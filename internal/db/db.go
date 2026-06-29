@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -15,13 +14,13 @@ func PrintVersion(dbPath string) error {
 		return err
 	}
 	defer conn.Close()
-	log.Printf("connected to SQLite database at %s", dbPath)
+	log.Printf("connected to SQLite database at %q", dbPath)
 
 	var sqliteVersion string
 	if err := conn.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err != nil {
 		return err
 	}
 
-	fmt.Println(sqliteVersion)
+	log.Println(sqliteVersion)
 	return nil
 }
