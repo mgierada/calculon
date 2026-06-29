@@ -150,9 +150,9 @@ func parseTime(s string) (time.Time, error) {
 
 // firstCell returns the first non-empty, trimmed cell of a row, or "" if none.
 func firstCell(row []string) string {
-	for _, c := range row {
-		if t := strings.TrimSpace(c); t != "" {
-			return t
+	for _, cell := range row {
+		if trimmed_cell := strings.TrimSpace(cell); trimmed_cell != "" {
+			return trimmed_cell
 		}
 	}
 	return ""
