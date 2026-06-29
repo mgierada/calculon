@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"fmt"
@@ -10,7 +10,9 @@ import (
 	"github.com/NimbleMarkets/ntcharts/v2/barchart"
 )
 
-func main() {
+// Render draws a horizontal bar chart of random values to stdout, colored as a
+// red gradient from largest (brightest) to smallest (darkest).
+func Render() {
 	const barCount = 10
 	const baseValue = 1.0
 	const jitterRange = 1.0 // +/- 0.5 around baseValue
