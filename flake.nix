@@ -16,7 +16,6 @@
             pkgs.go_1_26
             pkgs.gitleaks
             pkgs.go-migrate
-            pkgs.git
           ];
         };
       });
