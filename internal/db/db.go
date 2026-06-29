@@ -3,17 +3,19 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"log"
+
 	_ "github.com/glebarez/go-sqlite"
 )
 
-// PrintVersion opens the local SQLite database and prints its engine version.
-func PrintVersion() error {
-	conn, err := sql.Open("sqlite", "./db.go")
+// PrintVersion opens the SQLite database at dbPath and prints its engine version.
+func PrintVersion(dbPath string) error {
+	conn, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	fmt.Println("Connected to the SQLite database successfully.")
+	log.Printf("connected to SQLite database at %s", dbPath)
 
 	var sqliteVersion string
 	if err := conn.QueryRow("select sqlite_version()").Scan(&sqliteVersion); err != nil {
