@@ -24,6 +24,22 @@ func ReadXlsx(filePath, sheet string) ([][]string, error) {
 	return rows, nil
 }
 
+// XlsxSheetNames lists the workbook's sheet names, trimmed, without reading any
+// cells. It is cheap enough to sniff a file's format.
+func XlsxSheetNames(filePath string) ([]string, error) {
+	file, err := open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFile(file)
+
+	names := file.GetSheetList()
+	for i, name := range names {
+		names[i] = strings.TrimSpace(name)
+	}
+	return names, nil
+}
+
 // ReadXlsxSheets returns every sheet in the workbook keyed by its name, opening
 // the file once. Sheet names are trimmed because providers are inconsistent
 // about trailing whitespace.

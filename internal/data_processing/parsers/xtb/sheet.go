@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-// xtbTimeLayout is how XTB writes timestamps, e.g. "02/01/2006 15:04:05".
-const xtbTimeLayout = "02/01/2006 15:04:05"
+// xtbTimeLayout is how XTB writes timestamps, always in UTC,
+// e.g. "2026-09-16 08:17:01".
+const xtbTimeLayout = "2006-01-02 15:04:05"
 
-// totalRowLabel marks the summary row that terminates a data table.
-const totalRowLabel = "Total"
+// summaryRowLabels mark the rows that terminate a data table.
+var summaryRowLabels = map[string]bool{"Total": true, "Profit/loss": true}
 
 // columns maps a header label to its column index.
 type columns map[string]int
@@ -49,7 +50,7 @@ func (c columns) get(row []string, label string) string {
 	return strings.TrimSpace(row[idx])
 }
 
-// dataRows returns the rows between a table header and its "Total" summary row,
+// dataRows returns the rows between a table header and its summary row,
 // skipping blank rows. The bool is false when the header is missing.
 func dataRows(rows [][]string, required []string) ([][]string, columns, bool) {
 	headerIdx, cols := findHeader(rows, required)
@@ -59,15 +60,62 @@ func dataRows(rows [][]string, required []string) ([][]string, columns, bool) {
 
 	var data [][]string
 	for _, row := range rows[headerIdx+1:] {
-		switch firstCell(row) {
-		case totalRowLabel:
+		first := firstCell(row)
+		if summaryRowLabels[first] {
 			return data, cols, true
-		case "":
+		}
+		if first == "" {
 			continue
 		}
 		data = append(data, row)
 	}
 	return data, cols, true
+}
+
+// headerValue returns the cell right of a label in the metadata block at the
+// top of a sheet, e.g. "Account number | 50747414".
+func headerValue(rows [][]string, label string) string {
+	for _, row := range rows {
+		for col, cell := range row {
+			if strings.TrimSpace(cell) != label || col+1 >= len(row) {
+				continue
+			}
+			return strings.TrimSpace(row[col+1])
+		}
+	}
+	return ""
+}
+
+// fieldParser collects the first error hit while reading a row's cells, so a
+// row reads as a flat list of assignments instead of a ladder of checks.
+type fieldParser struct {
+	row  []string
+	cols columns
+	err  error
+	// field names the first cell that failed to parse.
+	field string
+}
+
+func (p *fieldParser) text(label string) string {
+	return p.cols.get(p.row, label)
+}
+
+func (p *fieldParser) float(label string) float64 {
+	value, err := parseFloat(p.cols.get(p.row, label))
+	p.fail(label, err)
+	return value
+}
+
+func (p *fieldParser) time(label string) time.Time {
+	value, err := parseTime(p.cols.get(p.row, label))
+	p.fail(label, err)
+	return value
+}
+
+func (p *fieldParser) fail(label string, err error) {
+	if err != nil && p.err == nil {
+		p.err, p.field = err, label
+	}
 }
 
 // parseFloat parses an XTB numeric cell, treating an empty cell as zero.
@@ -83,7 +131,7 @@ func parseTime(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
-	return time.Parse(xtbTimeLayout, s)
+	return time.ParseInLocation(xtbTimeLayout, s, time.UTC)
 }
 
 // firstCell returns the first non-empty, trimmed cell of a row, or "" if none.
@@ -94,4 +142,14 @@ func firstCell(row []string) string {
 		}
 	}
 	return ""
+}
+
+// sequencer numbers rows that share a key, in file order, so otherwise
+// identical rows get distinct and stable identities.
+type sequencer map[string]int
+
+func (s sequencer) next(key string) int {
+	seq := s[key]
+	s[key] = seq + 1
+	return seq
 }

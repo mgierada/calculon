@@ -3,140 +3,133 @@ package xtb
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/mgierada/calculon/internal/model"
 )
 
-// positionHeader are the labels that identify a position table. Both the closed
-// and the open sheet carry them; the columns they differ on (close time and
-// price versus market price) are read opportunistically.
-var positionHeader = []string{"Position", "Symbol", "Volume"}
+// closedHeader are the labels that identify the closed position table.
+var closedHeader = []string{"Ticker", "Position ID", "Volume", "Close Time (UTC)"}
 
-// XTBPosition is one row of an XTB position sheet, in XTB's own shape. Fields
-// absent from a given sheet stay zero.
-type XTBPosition struct {
-	Position      string
-	Symbol        string
-	Type          string
-	Volume        float64
-	OpenTime      time.Time
-	OpenPrice     float64
-	CloseTime     time.Time
-	ClosePrice    float64
-	MarketPrice   float64
-	OpenOrigin    string
-	CloseOrigin   string
-	PurchaseValue float64
-	SaleValue     float64
-	SL            float64
-	TP            float64
-	Margin        float64
-	Commission    float64
-	Swap          float64
-	Rollover      float64
-	GrossPL       float64
-	Comment       string
-}
+// openHeader are the labels that identify the open position table.
+var openHeader = []string{"Instrument/Position", "Ticker", "Type", "Volume", "Current price"}
 
-// ToPosition converts the XTB row into the canonical position record.
-func (p XTBPosition) ToPosition(accountID string) model.Position {
-	return model.Position{
-		Provider:      model.ProviderXTB,
-		AccountID:     accountID,
-		ExternalID:    p.Position,
-		Symbol:        p.Symbol,
-		Side:          model.Side(strings.ToUpper(p.Type)),
-		Volume:        p.Volume,
-		OpenTime:      p.OpenTime,
-		OpenPrice:     p.OpenPrice,
-		CloseTime:     p.CloseTime,
-		ClosePrice:    p.ClosePrice,
-		PurchaseValue: p.PurchaseValue,
-		SaleValue:     p.SaleValue,
-		Commission:    p.Commission,
-		Swap:          p.Swap,
-		Rollover:      p.Rollover,
-		GrossPL:       p.GrossPL,
-		Comment:       p.Comment,
-	}
-}
-
-// parsePositions reads a position sheet into validated canonical positions. It
-// returns nil when the sheet holds no position table.
-func parsePositions(rows [][]string, accountID string) ([]model.Position, error) {
-	data, cols, ok := dataRows(rows, positionHeader)
+// parseClosedPositions reads the closed position sheet into validated records.
+// It returns nil when the sheet holds no closed position table.
+func parseClosedPositions(rows [][]string) ([]model.Position, error) {
+	data, cols, ok := dataRows(rows, closedHeader)
 	if !ok {
 		return nil, nil
 	}
 
+	seqs := sequencer{}
 	positions := make([]model.Position, 0, len(data))
 	for _, row := range data {
-		raw, err := parsePositionRow(row, cols)
+		position, err := parseClosedRow(row, cols)
 		if err != nil {
 			return nil, err
 		}
-		position := raw.ToPosition(accountID)
+		position.Seq = seqs.next(position.Key())
 		if err := position.Validate(); err != nil {
 			return nil, err
 		}
 		positions = append(positions, position)
 	}
-
 	return positions, nil
 }
 
-// parsePositionRow maps one sheet row onto an XTBPosition.
-func parsePositionRow(row []string, cols columns) (XTBPosition, error) {
-	var pos XTBPosition
-
-	pos.Position = cols.get(row, "Position")
-	pos.Symbol = cols.get(row, "Symbol")
-	pos.Type = cols.get(row, "Type")
-	pos.OpenOrigin = cols.get(row, "Open origin")
-	pos.CloseOrigin = cols.get(row, "Close origin")
-	pos.Comment = cols.get(row, "Comment")
-
-	floatFields := []struct {
-		dst   *float64
-		label string
-	}{
-		{&pos.Volume, "Volume"},
-		{&pos.OpenPrice, "Open price"},
-		{&pos.ClosePrice, "Close price"},
-		{&pos.MarketPrice, "Market price"},
-		{&pos.PurchaseValue, "Purchase value"},
-		{&pos.SaleValue, "Sale value"},
-		{&pos.SL, "SL"},
-		{&pos.TP, "TP"},
-		{&pos.Margin, "Margin"},
-		{&pos.Commission, "Commission"},
-		{&pos.Swap, "Swap"},
-		{&pos.Rollover, "Rollover"},
-		{&pos.GrossPL, "Gross P/L"},
+// parseClosedRow maps one closed position row onto a position.
+func parseClosedRow(row []string, cols columns) (model.Position, error) {
+	p := fieldParser{row: row, cols: cols}
+	position := model.Position{
+		Instrument: model.Instrument{
+			Symbol:   p.text("Ticker"),
+			Name:     p.text("Instrument"),
+			Category: p.text("Category"),
+		},
+		PositionID:    p.text("Position ID"),
+		Product:       p.text("Product"),
+		Side:          model.Side(strings.ToUpper(p.text("Type"))),
+		Volume:        p.float("Volume"),
+		OpenTime:      p.time("Open Time (UTC)"),
+		OpenPrice:     p.float("Open Price"),
+		CloseTime:     p.time("Close Time (UTC)"),
+		ClosePrice:    p.float("Close Price"),
+		PurchaseValue: p.float("Purchase Value"),
+		SaleValue:     p.float("Sale Value"),
+		Commission:    p.float("Commission"),
+		Swap:          p.float("Swap"),
+		Rollover:      p.float("Rollover"),
+		GrossPL:       p.float("Gross Profit"),
+		NetPL:         p.float("Profit/Loss"),
+		CloseOrigin:   p.text("Close Origin"),
+		Comment:       p.text("Comment"),
 	}
-	for _, field := range floatFields {
-		value, err := parseFloat(cols.get(row, field.label))
-		if err != nil {
-			return XTBPosition{}, fmt.Errorf("position %s: field %q: %w", pos.Position, field.label, err)
+	if p.err != nil {
+		return model.Position{}, fmt.Errorf("position %s: field %q: %w",
+			position.PositionID, p.field, p.err)
+	}
+	return position, nil
+}
+
+// parseOpenLots reads the open position sheet. XTB groups it by ticker: a
+// summary row carrying the instrument name and category (and no side) precedes
+// one row per lot, whose "Instrument/Position" cell holds the position id.
+func parseOpenLots(rows [][]string) ([]model.OpenLot, error) {
+	data, cols, ok := dataRows(rows, openHeader)
+	if !ok {
+		return nil, nil
+	}
+
+	instruments := map[string]model.Instrument{}
+	seqs := sequencer{}
+	var lots []model.OpenLot
+	for _, row := range data {
+		if cols.get(row, "Type") == "" {
+			symbol := cols.get(row, "Ticker")
+			instruments[symbol] = model.Instrument{
+				Symbol:   symbol,
+				Name:     cols.get(row, "Instrument/Position"),
+				Category: cols.get(row, "Category"),
+			}
+			continue
 		}
-		*field.dst = value
-	}
 
-	timeFields := []struct {
-		dst   *time.Time
-		label string
-	}{
-		{&pos.OpenTime, "Open time"},
-		{&pos.CloseTime, "Close time"},
-	}
-	for _, field := range timeFields {
-		value, err := parseTime(cols.get(row, field.label))
+		lot, err := parseOpenLotRow(row, cols)
 		if err != nil {
-			return XTBPosition{}, fmt.Errorf("position %s: field %q: %w", pos.Position, field.label, err)
+			return nil, err
 		}
-		*field.dst = value
+		if instrument, ok := instruments[lot.Symbol]; ok {
+			lot.Instrument = instrument
+		}
+		lot.Seq = seqs.next(lot.PositionID)
+		if err := lot.Validate(); err != nil {
+			return nil, err
+		}
+		lots = append(lots, lot)
 	}
+	return lots, nil
+}
 
-	return pos, nil
+// parseOpenLotRow maps one lot row onto an open lot.
+func parseOpenLotRow(row []string, cols columns) (model.OpenLot, error) {
+	p := fieldParser{row: row, cols: cols}
+	lot := model.OpenLot{
+		Instrument:   model.Instrument{Symbol: p.text("Ticker")},
+		PositionID:   p.text("Instrument/Position"),
+		Product:      p.text("Product"),
+		Side:         model.Side(strings.ToUpper(p.text("Type"))),
+		Volume:       p.float("Volume"),
+		OpenTime:     p.time("Open time (UTC)"),
+		OpenPrice:    p.float("Open price"),
+		CurrentPrice: p.float("Current price"),
+		Value:        p.float("Value"),
+		GrossPL:      p.float("Gross Profit"),
+		NetPL:        p.float("Net Profit"),
+		Commission:   p.float("Open Commission"),
+		Swap:         p.float("Swap"),
+	}
+	if p.err != nil {
+		return model.OpenLot{}, fmt.Errorf("open lot %s: field %q: %w", lot.PositionID, p.field, p.err)
+	}
+	return lot, nil
 }

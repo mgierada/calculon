@@ -61,12 +61,12 @@ func TestDistribute(t *testing.T) {
 
 func TestGridResizeSplitsByWeight(t *testing.T) {
 	table, chart, summary := &stub{name: "table"}, &stub{name: "chart"}, &stub{name: "summary"}
-	grid := Grid{Rows: []Row{
+	grid := &Grid{Rows: []Row{
 		{Weight: 2, Cells: []Cell{{Component: table, Weight: 3}, {Component: chart, Weight: 1}}},
 		{Weight: 1, Cells: []Cell{{Component: summary}}},
 	}}
 
-	grid.Resize(120, 60)
+	grid.SetSize(120, 60)
 
 	if got, want := table.box(), "90x40"; got != want {
 		t.Errorf("table box = %s, want %s", got, want)
@@ -81,9 +81,9 @@ func TestGridResizeSplitsByWeight(t *testing.T) {
 
 func TestGridResizeSkipsNilCells(t *testing.T) {
 	table := &stub{name: "table"}
-	grid := Grid{Rows: []Row{{Cells: []Cell{{Component: nil}, {Component: table}}}}}
+	grid := &Grid{Rows: []Row{{Cells: []Cell{{Component: nil}, {Component: table}}}}}
 
-	grid.Resize(80, 24)
+	grid.SetSize(80, 24)
 
 	// The nil cell still claims its share of the width; only its component is skipped.
 	if got, want := table.box(), "40x24"; got != want {
@@ -95,7 +95,7 @@ func TestSingleFillsTheScreen(t *testing.T) {
 	table := &stub{name: "table"}
 	grid := Single(table)
 
-	grid.Resize(80, 24)
+	grid.SetSize(80, 24)
 
 	if got, want := table.box(), "80x24"; got != want {
 		t.Errorf("table box = %s, want %s", got, want)
@@ -109,7 +109,7 @@ func TestStackSplitsHeightEvenly(t *testing.T) {
 	top, bottom := &stub{name: "top"}, &stub{name: "bottom"}
 	grid := Stack(top, bottom)
 
-	grid.Resize(80, 24)
+	grid.SetSize(80, 24)
 
 	if got, want := top.box(), "80x12"; got != want {
 		t.Errorf("top box = %s, want %s", got, want)
@@ -121,7 +121,7 @@ func TestStackSplitsHeightEvenly(t *testing.T) {
 
 func TestComponentsAreInPlacementOrder(t *testing.T) {
 	a, b, c := &stub{name: "a"}, &stub{name: "b"}, &stub{name: "c"}
-	grid := Grid{Rows: []Row{
+	grid := &Grid{Rows: []Row{
 		{Cells: []Cell{{Component: a}, {Component: b}}},
 		{Cells: []Cell{{Component: c}}},
 	}}
@@ -135,5 +135,46 @@ func TestComponentsAreInPlacementOrder(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("Components()[%d] = %v, want %v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestGridFixedRowsKeepTheirHeight(t *testing.T) {
+	stats, table := &stub{name: "stats"}, &stub{name: "table"}
+	grid := &Grid{Rows: []Row{
+		{Height: 5, Cells: Cells(stats)},
+		{Cells: Cells(table)},
+	}}
+	grid.SetSize(80, 30)
+
+	if got, want := stats.box(), "80x5"; got != want {
+		t.Errorf("fixed row box = %s, want %s", got, want)
+	}
+	if got, want := table.box(), "80x25"; got != want {
+		t.Errorf("flexible row box = %s, want %s", got, want)
+	}
+}
+
+// Fixed rows that do not fit shrink rather than overflow the screen.
+func TestGridFixedRowsShrinkToFit(t *testing.T) {
+	top, bottom := &stub{name: "top"}, &stub{name: "bottom"}
+	grid := &Grid{Rows: []Row{{Height: 8, Cells: Cells(top)}, {Height: 8, Cells: Cells(bottom)}}}
+	grid.SetSize(80, 10)
+
+	if got, want := bottom.box(), "80x2"; got != want {
+		t.Errorf("second fixed row box = %s, want %s", got, want)
+	}
+}
+
+func TestGridNestsGrids(t *testing.T) {
+	left, right, below := &stub{name: "left"}, &stub{name: "right"}, &stub{name: "below"}
+	inner := Stack(right, below)
+	grid := &Grid{Rows: []Row{{Cells: Cells(left, inner)}}}
+	grid.SetSize(100, 40)
+
+	if got, want := right.box(), "50x20"; got != want {
+		t.Errorf("nested cell box = %s, want %s", got, want)
+	}
+	if got := grid.Components(); len(got) != 3 || got[2] != below {
+		t.Errorf("Components() = %v, want the nested leaves flattened", got)
 	}
 }

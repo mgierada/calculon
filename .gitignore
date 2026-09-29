@@ -29,3 +29,9 @@ go.work.sum
 
 .direnv
 *.db
+
+# build output and generated ssh host key
+bin/
+.ssh/
+*.db-wal
+*.db-shm

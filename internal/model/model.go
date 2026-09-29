@@ -5,7 +5,7 @@ package model
 
 import (
 	"fmt"
-	"math"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +23,10 @@ const (
 	SideSell Side = "SELL"
 )
 
+// CategoryCFD marks derivative positions. Their notional is not owned, so they
+// are valued by profit only and left out of holdings.
+const CategoryCFD = "CFD"
+
 // CashOpKind is a normalized cash operation category. Providers spell their
 // operation types differently, so parsers map their raw labels onto these.
 type CashOpKind string
@@ -30,6 +34,7 @@ type CashOpKind string
 const (
 	CashOpDeposit       CashOpKind = "deposit"
 	CashOpWithdrawal    CashOpKind = "withdrawal"
+	CashOpTransfer      CashOpKind = "transfer"
 	CashOpStockPurchase CashOpKind = "stock_purchase"
 	CashOpStockSale     CashOpKind = "stock_sale"
 	CashOpCloseTrade    CashOpKind = "close_trade"
@@ -37,24 +42,79 @@ const (
 	CashOpWithholdTax   CashOpKind = "withholding_tax"
 	CashOpInterest      CashOpKind = "interest"
 	CashOpInterestTax   CashOpKind = "interest_tax"
+	CashOpFee           CashOpKind = "fee"
 	CashOpOther         CashOpKind = "other"
 )
 
-// Statement is everything one provider statement file contains, normalized.
-type Statement struct {
-	Provider  Provider
-	AccountID string
-	Positions []Position
-	CashOps   []CashOp
+// IsContribution reports whether the operation moves money into or out of the
+// investor's accounts rather than being earned or spent inside them. Transfers
+// between two of the investor's own accounts cancel out once both are imported.
+func (k CashOpKind) IsContribution() bool {
+	return k == CashOpDeposit || k == CashOpWithdrawal || k == CashOpTransfer
 }
 
-// Position is a single trade position. CloseTime and ClosePrice are zero while
-// the position is still open.
+// Account is one brokerage account. Every record in a statement belongs to one.
+type Account struct {
+	Provider Provider
+	ID       string
+	// Currency is the currency the account is denominated in and every amount
+	// and price in its records is expressed in.
+	Currency string
+}
+
+// Validate checks the invariants the database and UI rely on.
+func (a Account) Validate() error {
+	if a.Provider == "" {
+		return fmt.Errorf("account %q: provider is empty", a.ID)
+	}
+	if a.ID == "" {
+		return fmt.Errorf("account: id is empty")
+	}
+	if a.Currency == "" {
+		return fmt.Errorf("account %s: currency is empty", a.ID)
+	}
+	return nil
+}
+
+// AccountSnapshot is an account with the time its open lot snapshot was taken,
+// zero when none has been imported.
+type AccountSnapshot struct {
+	Account
+	AsOf time.Time
+}
+
+// Owned pairs a record with the account it belongs to, for reads that span
+// several accounts.
+type Owned[T any] struct {
+	Account Account
+	Record  T
+}
+
+// Statement is everything one provider statement file contains, normalized.
+type Statement struct {
+	Account   Account
+	Positions []Position
+	CashOps   []CashOp
+	// OpenLots is the set of open positions as of AsOf. Unlike the history it
+	// is a snapshot: a lot missing from a newer statement has been closed.
+	OpenLots []OpenLot
+	AsOf     time.Time
+}
+
+// Instrument describes what a record trades.
+type Instrument struct {
+	Symbol   string
+	Name     string
+	Category string
+}
+
+// Position is one closed trade. Partial closes of the same broker position
+// share a PositionID, so Seq disambiguates rows that are otherwise identical.
 type Position struct {
-	Provider      Provider
-	AccountID     string
-	ExternalID    string
-	Symbol        string
+	Instrument
+	PositionID    string
+	Seq           int
+	Product       string
 	Side          Side
 	Volume        float64
 	OpenTime      time.Time
@@ -67,43 +127,81 @@ type Position struct {
 	Swap          float64
 	Rollover      float64
 	GrossPL       float64
+	NetPL         float64
+	CloseOrigin   string
 	Comment       string
 }
 
-// IsOpen reports whether the position has not been closed yet.
-func (p Position) IsOpen() bool {
-	return p.CloseTime.IsZero()
+// Key identifies the closed position across re-imports. It is built from the
+// fields that never change once a trade has closed; everything else may be
+// corrected by the broker and is updated in place.
+func (p Position) Key() string {
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s#%d",
+		p.PositionID, p.OpenTime.UTC().Format(time.RFC3339), p.CloseTime.UTC().Format(time.RFC3339),
+		formatFloat(p.Volume), formatFloat(p.OpenPrice), formatFloat(p.ClosePrice), p.Seq)
 }
 
 // Validate checks the invariants the database and UI rely on.
 func (p Position) Validate() error {
-	if err := validateIdentity(p.Provider, p.AccountID, p.ExternalID); err != nil {
+	if p.PositionID == "" {
+		return fmt.Errorf("position: id is empty")
+	}
+	if err := validateTrade(p.PositionID, p.Symbol, p.Side, p.Volume, p.OpenTime, p.OpenPrice); err != nil {
 		return err
 	}
-	if p.Symbol == "" {
-		return fmt.Errorf("position %s: symbol is empty", p.ExternalID)
-	}
-	if p.Side != SideBuy && p.Side != SideSell {
-		return fmt.Errorf("position %s: unknown side %q", p.ExternalID, p.Side)
-	}
-	if p.Volume <= 0 {
-		return fmt.Errorf("position %s: volume must be positive, got %v", p.ExternalID, p.Volume)
-	}
-	if p.OpenTime.IsZero() {
-		return fmt.Errorf("position %s: open time is missing", p.ExternalID)
-	}
-	if p.OpenPrice <= 0 {
-		return fmt.Errorf("position %s: open price must be positive, got %v", p.ExternalID, p.OpenPrice)
-	}
-	if p.IsOpen() {
-		return nil
+	if p.CloseTime.IsZero() {
+		return fmt.Errorf("position %s: close time is missing", p.PositionID)
 	}
 	if p.CloseTime.Before(p.OpenTime) {
 		return fmt.Errorf("position %s: close time %s precedes open time %s",
-			p.ExternalID, p.CloseTime.Format(time.RFC3339), p.OpenTime.Format(time.RFC3339))
+			p.PositionID, p.CloseTime.Format(time.RFC3339), p.OpenTime.Format(time.RFC3339))
 	}
 	if p.ClosePrice <= 0 {
-		return fmt.Errorf("position %s: closed position needs a close price", p.ExternalID)
+		return fmt.Errorf("position %s: close price must be positive, got %v",
+			p.PositionID, p.ClosePrice)
+	}
+	return nil
+}
+
+// OpenLot is one still-open position as of a statement's snapshot time.
+// CurrentPrice and Value are the broker's valuation at that time.
+type OpenLot struct {
+	Instrument
+	PositionID   string
+	Seq          int
+	Product      string
+	Side         Side
+	Volume       float64
+	OpenTime     time.Time
+	OpenPrice    float64
+	CurrentPrice float64
+	Value        float64
+	GrossPL      float64
+	NetPL        float64
+	Commission   float64
+	Swap         float64
+}
+
+// Key identifies the lot within its snapshot.
+func (l OpenLot) Key() string {
+	return fmt.Sprintf("%s#%d", l.PositionID, l.Seq)
+}
+
+// CostBasis is what the lot cost to open.
+func (l OpenLot) CostBasis() float64 {
+	return l.Volume * l.OpenPrice
+}
+
+// Validate checks the invariants the database and UI rely on.
+func (l OpenLot) Validate() error {
+	if l.PositionID == "" {
+		return fmt.Errorf("open lot: id is empty")
+	}
+	if err := validateTrade(l.PositionID, l.Symbol, l.Side, l.Volume, l.OpenTime, l.OpenPrice); err != nil {
+		return err
+	}
+	if l.CurrentPrice < 0 {
+		return fmt.Errorf("open lot %s: current price is negative", l.PositionID)
 	}
 	return nil
 }
@@ -113,14 +211,14 @@ func (p Position) Validate() error {
 // destructured out of the provider's free-text comment. Volume is always
 // positive; Kind carries the direction.
 type CashOp struct {
-	Provider   Provider
-	AccountID  string
+	Instrument
 	ExternalID string
 	Kind       CashOpKind
 	RawType    string
 	Time       time.Time
+	Product    string
+	PositionID string
 	Comment    string
-	Symbol     string
 	Amount     float64
 	Volume     float64
 	Price      float64
@@ -133,8 +231,8 @@ func (c CashOp) MovesStock() bool {
 
 // Validate checks the invariants the database and UI rely on.
 func (c CashOp) Validate() error {
-	if err := validateIdentity(c.Provider, c.AccountID, c.ExternalID); err != nil {
-		return err
+	if c.ExternalID == "" {
+		return fmt.Errorf("cash op: id is empty")
 	}
 	if c.Kind == "" {
 		return fmt.Errorf("cash op %s: kind is empty", c.ExternalID)
@@ -159,36 +257,37 @@ func (c CashOp) Validate() error {
 	return nil
 }
 
-// Holding is the aggregated open exposure to one symbol.
-type Holding struct {
+// Quote is one observed price of a symbol, in the currency the symbol trades
+// in on its account. Statements contribute one quote per held symbol; a market
+// data source can contribute more.
+type Quote struct {
 	Symbol string
-	// Volume is purchased volume minus sold volume.
-	Volume float64
-	// AvgOpenPrice is the volume-weighted average price of all purchases,
-	// i.e. average cost basis rather than FIFO lot cost.
-	AvgOpenPrice float64
-	// FirstOpen is the timestamp of the earliest purchase.
-	FirstOpen time.Time
+	AsOf   time.Time
+	Price  float64
+	Source string
 }
 
-// DaysHeld is whole days between the first purchase and now.
-func (h Holding) DaysHeld(now time.Time) int {
-	if h.FirstOpen.IsZero() {
-		return 0
+// validateTrade checks the fields every opened trade carries.
+func validateTrade(id, symbol string, side Side, volume float64, openTime time.Time, openPrice float64) error {
+	if symbol == "" {
+		return fmt.Errorf("position %s: symbol is empty", id)
 	}
-	return int(math.Floor(now.Sub(h.FirstOpen).Hours() / 24))
-}
-
-// validateIdentity checks the fields that make up a record's natural key.
-func validateIdentity(provider Provider, accountID, externalID string) error {
-	if provider == "" {
-		return fmt.Errorf("record %q: provider is empty", externalID)
+	if side != SideBuy && side != SideSell {
+		return fmt.Errorf("position %s: unknown side %q", id, side)
 	}
-	if accountID == "" {
-		return fmt.Errorf("record %q: account id is empty", externalID)
+	if volume <= 0 {
+		return fmt.Errorf("position %s: volume must be positive, got %v", id, volume)
 	}
-	if externalID == "" {
-		return fmt.Errorf("record: external id is empty")
+	if openTime.IsZero() {
+		return fmt.Errorf("position %s: open time is missing", id)
+	}
+	if openPrice <= 0 {
+		return fmt.Errorf("position %s: open price must be positive, got %v", id, openPrice)
 	}
 	return nil
+}
+
+// formatFloat renders a float with the fewest digits that round-trip.
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }

@@ -1,11 +1,18 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/mgierada/calculon/internal/model"
+)
+
+var (
+	testAccount = model.Account{Provider: model.ProviderXTB, ID: "50747414", Currency: "PLN"}
+	testAsOf    = time.Date(2026, 9, 28, 9, 17, 56, 0, time.UTC)
 )
 
 // openTestDB returns a connection to a fresh database on disk. A file rather
@@ -22,135 +29,304 @@ func openTestDB(t *testing.T) *Conn {
 	return conn
 }
 
-func testPosition(externalID, symbol string) model.Position {
+func createTestUser(t *testing.T, conn *Conn, name string) User {
+	t.Helper()
+
+	user, err := CreateUser(conn, name)
+	if err != nil {
+		t.Fatalf("CreateUser returned error: %v", err)
+	}
+	return user
+}
+
+func testPosition(positionID string, volume float64) model.Position {
 	return model.Position{
-		Provider:   model.ProviderXTB,
-		AccountID:  "50747414",
-		ExternalID: externalID,
-		Symbol:     symbol,
+		Instrument: model.Instrument{Symbol: "NWG.PL", Name: "Newag", Category: "STOCK"},
+		PositionID: positionID,
 		Side:       model.SideBuy,
-		Volume:     1,
-		OpenTime:   time.Date(2026, 5, 4, 12, 40, 36, 0, time.UTC),
+		Volume:     volume,
+		OpenTime:   time.Date(2026, 5, 4, 10, 40, 36, 0, time.UTC),
 		OpenPrice:  109.20,
+		CloseTime:  time.Date(2026, 6, 3, 7, 49, 56, 0, time.UTC),
+		ClosePrice: 101.20,
+		NetPL:      -8 * volume,
 	}
 }
 
-func testCashOp(externalID, symbol string, kind model.CashOpKind, volume, price float64) model.CashOp {
+func testCashOp(externalID string, amount float64) model.CashOp {
 	return model.CashOp{
-		Provider:   model.ProviderXTB,
-		AccountID:  "50747414",
 		ExternalID: externalID,
-		Kind:       kind,
-		RawType:    string(kind),
+		Kind:       model.CashOpDeposit,
+		RawType:    "Deposit",
 		Time:       time.Date(2026, 5, 28, 9, 15, 33, 0, time.UTC),
-		Symbol:     symbol,
-		Volume:     volume,
-		Price:      price,
+		Amount:     amount,
 	}
+}
+
+func testLot(positionID, symbol string, price float64) model.OpenLot {
+	return model.OpenLot{
+		Instrument:   model.Instrument{Symbol: symbol, Name: symbol, Category: "STOCK"},
+		PositionID:   positionID,
+		Side:         model.SideBuy,
+		Volume:       5,
+		OpenTime:     time.Date(2026, 5, 27, 13, 24, 27, 0, time.UTC),
+		OpenPrice:    274.6,
+		CurrentPrice: price,
+		Value:        5 * price,
+	}
+}
+
+func testStatement() model.Statement {
+	return model.Statement{
+		Account: testAccount,
+		AsOf:    testAsOf,
+		Positions: []model.Position{
+			testPosition("p1", 1),
+			// A partial close of the same position is its own record.
+			testPosition("p1", 2),
+		},
+		CashOps:  []model.CashOp{testCashOp("c1", 2000), testCashOp("c2", 500)},
+		OpenLots: []model.OpenLot{testLot("l1", "SNT.PL", 346.4), testLot("l2", "SNT.PL", 346.4)},
+	}
+}
+
+func mustImport(t *testing.T, conn *Conn, userID int64, statement model.Statement) ImportResult {
+	t.Helper()
+
+	result, err := Import(conn, userID, statement)
+	if err != nil {
+		t.Fatalf("Import returned error: %v", err)
+	}
+	return result
 }
 
 func TestImportIsIdempotent(t *testing.T) {
 	conn := openTestDB(t)
-	statement := model.Statement{
-		Provider:  model.ProviderXTB,
-		AccountID: "50747414",
-		Positions: []model.Position{testPosition("p1", "NWG.PL"), testPosition("p2", "NWG.PL")},
-		CashOps: []model.CashOp{
-			testCashOp("c1", "SNT.PL", model.CashOpStockPurchase, 4, 273.60),
-			testCashOp("c2", "", model.CashOpDeposit, 0, 0),
-		},
+	user := createTestUser(t, conn, "alice")
+
+	first := mustImport(t, conn, user.ID, testStatement())
+	if first.Positions != (Changes{Inserted: 2}) || first.CashOps != (Changes{Inserted: 2}) {
+		t.Errorf("first import = positions %s, cash ops %s", first.Positions, first.CashOps)
+	}
+	if first.Quotes != (Changes{Inserted: 1}) {
+		t.Errorf("first import quotes = %s, want one per symbol", first.Quotes)
 	}
 
-	first, err := Import(conn, statement)
-	if err != nil {
-		t.Fatalf("first Import returned error: %v", err)
-	}
-	if first.Inserted != 4 {
-		t.Errorf("first import inserted %d records, want 4", first.Inserted)
-	}
-	if len(first.Duplicates) != 0 {
-		t.Errorf("first import reported duplicates %v, want none", first.Duplicates)
-	}
-
-	second, err := Import(conn, statement)
-	if err != nil {
-		t.Fatalf("second Import returned error: %v", err)
-	}
-	if second.Inserted != 0 {
-		t.Errorf("second import inserted %d records, want 0", second.Inserted)
-	}
-	if len(second.Duplicates) != 4 {
-		t.Fatalf("second import reported %d duplicates, want 4", len(second.Duplicates))
-	}
-
-	wantIDs := map[string]bool{"p1": true, "p2": true, "c1": true, "c2": true}
-	for _, duplicate := range second.Duplicates {
-		if !wantIDs[duplicate.ExternalID] {
-			t.Errorf("unexpected duplicate %s", duplicate)
-		}
-		delete(wantIDs, duplicate.ExternalID)
-	}
-	if len(wantIDs) != 0 {
-		t.Errorf("duplicates missing for %v", wantIDs)
+	second := mustImport(t, conn, user.ID, testStatement())
+	if second.Positions != (Changes{Unchanged: 2}) || second.CashOps != (Changes{Unchanged: 2}) {
+		t.Errorf("second import = positions %s, cash ops %s", second.Positions, second.CashOps)
 	}
 }
 
-// An overlapping statement re-lists records already held and adds the new ones.
-func TestImportOverlappingStatement(t *testing.T) {
+func TestImportUpdatesChangedRecords(t *testing.T) {
 	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	mustImport(t, conn, user.ID, testStatement())
 
-	if _, err := Import(conn, model.Statement{
-		Positions: []model.Position{testPosition("p1", "NWG.PL")},
-	}); err != nil {
-		t.Fatalf("first Import returned error: %v", err)
+	corrected := testStatement()
+	corrected.CashOps[0].Comment = "corrected by broker"
+	corrected.Positions[1].NetPL = -99
+	result := mustImport(t, conn, user.ID, corrected)
+
+	if result.CashOps != (Changes{Updated: 1, Unchanged: 1}) {
+		t.Errorf("cash ops = %s, want 1 updated", result.CashOps)
+	}
+	if result.Positions != (Changes{Updated: 1, Unchanged: 1}) {
+		t.Errorf("positions = %s, want 1 updated", result.Positions)
 	}
 
-	result, err := Import(conn, model.Statement{
-		Positions: []model.Position{testPosition("p1", "NWG.PL"), testPosition("p2", "CDR.PL")},
-	})
+	positions, err := ClosedPositions(conn, user.ID)
 	if err != nil {
-		t.Fatalf("second Import returned error: %v", err)
+		t.Fatalf("ClosedPositions returned error: %v", err)
 	}
-	if result.Inserted != 1 {
-		t.Errorf("inserted %d records, want 1", result.Inserted)
+	var netPLs []float64
+	for _, p := range positions {
+		netPLs = append(netPLs, p.Record.NetPL)
 	}
-	if len(result.Duplicates) != 1 || result.Duplicates[0].ExternalID != "p1" {
-		t.Errorf("duplicates = %v, want just p1", result.Duplicates)
+	if len(netPLs) != 2 || (netPLs[0] != -99 && netPLs[1] != -99) {
+		t.Errorf("net P/Ls after update = %v, want one of them -99", netPLs)
 	}
 }
 
-// Accounts are part of the natural key, so the same symbol in two accounts is
-// two records rather than a duplicate.
-func TestImportSeparatesAccounts(t *testing.T) {
+func TestImportReplacesSnapshotOnlyWhenNewer(t *testing.T) {
 	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	mustImport(t, conn, user.ID, testStatement())
 
-	first := testPosition("shared-id", "SNT.PL")
-	second := first
-	second.AccountID = "51099570"
-
-	result, err := Import(conn, model.Statement{Positions: []model.Position{first, second}})
-	if err != nil {
-		t.Fatalf("Import returned error: %v", err)
+	newer := testStatement()
+	newer.AsOf = testAsOf.Add(24 * time.Hour)
+	newer.OpenLots = []model.OpenLot{testLot("l1", "SNT.PL", 350), testLot("l3", "CDR.PL", 250)}
+	if result := mustImport(t, conn, user.ID, newer); !result.SnapshotReplaced {
+		t.Error("newer statement did not replace the snapshot")
 	}
-	if result.Inserted != 2 {
-		t.Errorf("inserted %d records, want 2", result.Inserted)
+
+	older := testStatement()
+	older.AsOf = testAsOf.Add(-24 * time.Hour)
+	if result := mustImport(t, conn, user.ID, older); result.SnapshotReplaced {
+		t.Error("older statement replaced the snapshot")
+	}
+
+	lots, err := OpenLots(conn, user.ID)
+	if err != nil {
+		t.Fatalf("OpenLots returned error: %v", err)
+	}
+	if len(lots) != 2 || lots[0].Record.PositionID != "l3" || lots[1].Record.CurrentPrice != 350 {
+		t.Errorf("open lots = %+v, want l3 and l1 from the newest snapshot", lots)
+	}
+
+	accounts, err := Accounts(conn, user.ID)
+	if err != nil {
+		t.Fatalf("Accounts returned error: %v", err)
+	}
+	if len(accounts) != 1 || !accounts[0].AsOf.Equal(newer.AsOf) {
+		t.Errorf("accounts = %+v, want snapshot time %s", accounts, newer.AsOf)
+	}
+
+	// Quotes from the older statement are history and still kept.
+	quotes, err := Quotes(conn, user.ID)
+	if err != nil {
+		t.Fatalf("Quotes returned error: %v", err)
+	}
+	if len(quotes) != 4 {
+		t.Errorf("stored %d quotes, want 4: %+v", len(quotes), quotes)
 	}
 }
 
-func TestImportRejectsInvalidRecords(t *testing.T) {
+func TestImportScopesRecordsToTheirOwner(t *testing.T) {
 	conn := openTestDB(t)
+	alice := createTestUser(t, conn, "alice")
+	bob := createTestUser(t, conn, "bob")
+	mustImport(t, conn, alice.ID, testStatement())
 
-	invalid := testPosition("p1", "")
-	if _, err := Import(conn, model.Statement{Positions: []model.Position{invalid}}); err == nil {
-		t.Fatal("Import accepted a position with no symbol, want error")
+	if _, err := Import(conn, bob.ID, testStatement()); err == nil {
+		t.Fatal("bob imported alice's account, want error")
 	}
 
-	// The failed import must have rolled back rather than leaving half a statement.
-	holdings, err := OpenHoldings(conn)
+	lots, err := OpenLots(conn, bob.ID)
 	if err != nil {
-		t.Fatalf("OpenHoldings returned error: %v", err)
+		t.Fatalf("OpenLots returned error: %v", err)
 	}
-	if len(holdings) != 0 {
-		t.Errorf("holdings after failed import = %v, want none", holdings)
+	cashOps, err := CashOps(conn, bob.ID)
+	if err != nil {
+		t.Fatalf("CashOps returned error: %v", err)
+	}
+	quotes, err := Quotes(conn, bob.ID)
+	if err != nil {
+		t.Fatalf("Quotes returned error: %v", err)
+	}
+	if len(lots)+len(cashOps)+len(quotes) != 0 {
+		t.Errorf("bob sees %d lots, %d cash ops, %d quotes, want none",
+			len(lots), len(cashOps), len(quotes))
+	}
+}
+
+func TestImportRejectsCurrencyChange(t *testing.T) {
+	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	mustImport(t, conn, user.ID, testStatement())
+
+	statement := testStatement()
+	statement.Account.Currency = "USD"
+	if _, err := Import(conn, user.ID, statement); err == nil {
+		t.Fatal("Import accepted a currency change")
+	}
+}
+
+func TestImportRollsBackInvalidStatement(t *testing.T) {
+	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+
+	statement := testStatement()
+	statement.CashOps[1].ExternalID = ""
+	if _, err := Import(conn, user.ID, statement); err == nil {
+		t.Fatal("Import accepted a cash op without an id")
+	}
+
+	positions, err := ClosedPositions(conn, user.ID)
+	if err != nil {
+		t.Fatalf("ClosedPositions returned error: %v", err)
+	}
+	accounts, err := Accounts(conn, user.ID)
+	if err != nil {
+		t.Fatalf("Accounts returned error: %v", err)
+	}
+	if len(positions) != 0 || len(accounts) != 0 {
+		t.Errorf("failed import left %d positions and %d accounts", len(positions), len(accounts))
+	}
+}
+
+func TestReadsRoundTripRecords(t *testing.T) {
+	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	statement := testStatement()
+	mustImport(t, conn, user.ID, statement)
+
+	positions, err := ClosedPositions(conn, user.ID)
+	if err != nil {
+		t.Fatalf("ClosedPositions returned error: %v", err)
+	}
+	got := positions[0]
+	if got.Account != testAccount {
+		t.Errorf("position account = %+v, want %+v", got.Account, testAccount)
+	}
+	want := statement.Positions[0]
+	if got.Record.Key() != want.Key() && got.Record.Key() != statement.Positions[1].Key() {
+		t.Errorf("position key %q matches neither imported position", got.Record.Key())
+	}
+	if !got.Record.CloseTime.Equal(want.CloseTime) || got.Record.Name != "Newag" {
+		t.Errorf("position = %+v", got.Record)
+	}
+
+	cashOps, err := CashOps(conn, user.ID)
+	if err != nil {
+		t.Fatalf("CashOps returned error: %v", err)
+	}
+	if len(cashOps) != 2 || cashOps[0].Record.Kind != model.CashOpDeposit {
+		t.Errorf("cash ops = %+v", cashOps)
+	}
+}
+
+func TestStoreQuotes(t *testing.T) {
+	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	mustImport(t, conn, user.ID, testStatement())
+
+	quote := model.Quote{Symbol: "SNT.PL", AsOf: testAsOf.Add(time.Hour), Price: 350, Source: "api"}
+	changes, err := StoreQuotes(conn, []model.Quote{quote})
+	if err != nil {
+		t.Fatalf("StoreQuotes returned error: %v", err)
+	}
+	if changes != (Changes{Inserted: 1}) {
+		t.Errorf("changes = %s, want 1 new", changes)
+	}
+}
+
+func TestMigrateRefusesOldSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE positions (provider TEXT)`); err != nil {
+		t.Fatalf("creating old table: %v", err)
+	}
+	raw.Close()
+
+	if _, err := Open(path); !errors.Is(err, ErrIncompatibleSchema) {
+		t.Fatalf("Open on an old database returned %v, want ErrIncompatibleSchema", err)
+	}
+
+	// Refusing the file must leave it as it was, not switched to WAL.
+	raw, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	defer raw.Close()
+	var mode string
+	if err := raw.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("reading journal mode: %v", err)
+	}
+	if mode != "delete" {
+		t.Errorf("journal mode after refusal = %q, want the untouched default", mode)
 	}
 }
