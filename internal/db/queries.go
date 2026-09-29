@@ -11,11 +11,11 @@ import (
 // session can never see another user's records.
 
 const accountsSQL = `
-SELECT provider, account_id, currency, snapshot_as_of
+SELECT provider, account_id, currency, name, snapshot_as_of
 FROM accounts WHERE user_id = ? ORDER BY provider, account_id`
 
 const openLotsSQL = `
-SELECT a.provider, a.account_id, a.currency,
+SELECT a.provider, a.account_id, a.currency, a.name,
        l.position_id, l.seq, l.symbol, l.name, l.category, l.product, l.side, l.volume,
        l.open_time, l.open_price, l.current_price, l.value, l.gross_pl, l.net_pl,
        l.commission, l.swap
@@ -25,7 +25,7 @@ WHERE a.user_id = ?
 ORDER BY l.symbol, l.open_time`
 
 const positionsSQL = `
-SELECT a.provider, a.account_id, a.currency,
+SELECT a.provider, a.account_id, a.currency, a.name,
        p.position_id, p.seq, p.symbol, p.name, p.category, p.product, p.side, p.volume,
        p.open_time, p.open_price, p.close_time, p.close_price, p.purchase_value,
        p.sale_value, p.commission, p.swap, p.rollover, p.gross_pl, p.net_pl,
@@ -36,7 +36,7 @@ WHERE a.user_id = ?
 ORDER BY p.close_time DESC, p.position_id`
 
 const cashOpsSQL = `
-SELECT a.provider, a.account_id, a.currency,
+SELECT a.provider, a.account_id, a.currency, a.name,
        c.external_id, c.kind, c.raw_type, c.op_time, c.symbol, c.name, c.category,
        c.product, c.position_id, c.comment, c.amount, c.volume, c.price
 FROM cash_ops c
@@ -70,7 +70,7 @@ func Accounts(conn *sql.DB, userID int64) ([]model.AccountSnapshot, error) {
 			account model.AccountSnapshot
 			asOf    sql.NullString
 		)
-		if err := rows.Scan(&account.Provider, &account.ID, &account.Currency, &asOf); err != nil {
+		if err := rows.Scan(&account.Provider, &account.ID, &account.Currency, &account.Name, &asOf); err != nil {
 			return model.AccountSnapshot{}, err
 		}
 		var err error
@@ -88,7 +88,7 @@ func OpenLots(conn *sql.DB, userID int64) ([]model.Owned[model.OpenLot], error) 
 		)
 		lot := &owned.Record
 		err := rows.Scan(
-			&owned.Account.Provider, &owned.Account.ID, &owned.Account.Currency,
+			&owned.Account.Provider, &owned.Account.ID, &owned.Account.Currency, &owned.Account.Name,
 			&lot.PositionID, &lot.Seq, &lot.Symbol, &lot.Name, &lot.Category, &lot.Product,
 			&lot.Side, &lot.Volume, &openTime, &lot.OpenPrice, &lot.CurrentPrice, &lot.Value,
 			&lot.GrossPL, &lot.NetPL, &lot.Commission, &lot.Swap,
@@ -110,7 +110,7 @@ func ClosedPositions(conn *sql.DB, userID int64) ([]model.Owned[model.Position],
 		)
 		p := &owned.Record
 		err := rows.Scan(
-			&owned.Account.Provider, &owned.Account.ID, &owned.Account.Currency,
+			&owned.Account.Provider, &owned.Account.ID, &owned.Account.Currency, &owned.Account.Name,
 			&p.PositionID, &p.Seq, &p.Symbol, &p.Name, &p.Category, &p.Product, &p.Side,
 			&p.Volume, &openTime, &p.OpenPrice, &closeTime, &p.ClosePrice, &p.PurchaseValue,
 			&p.SaleValue, &p.Commission, &p.Swap, &p.Rollover, &p.GrossPL, &p.NetPL,
@@ -136,7 +136,7 @@ func CashOps(conn *sql.DB, userID int64) ([]model.Owned[model.CashOp], error) {
 		)
 		op := &owned.Record
 		err := rows.Scan(
-			&owned.Account.Provider, &owned.Account.ID, &owned.Account.Currency,
+			&owned.Account.Provider, &owned.Account.ID, &owned.Account.Currency, &owned.Account.Name,
 			&op.ExternalID, &op.Kind, &op.RawType, &opTime, &op.Symbol, &op.Name, &op.Category,
 			&op.Product, &op.PositionID, &op.Comment, &op.Amount, &op.Volume, &op.Price,
 		)
@@ -163,6 +163,19 @@ func Quotes(conn *sql.DB, userID int64) ([]model.Quote, error) {
 		quote.AsOf, err = parseRequiredTime(asOf)
 		return quote, err
 	})
+}
+
+// RenameAccount changes the label of one of the user's accounts.
+func RenameAccount(conn *sql.DB, userID int64, provider model.Provider, accountID, name string) error {
+	res, err := conn.Exec(`UPDATE accounts SET name = ?
+		WHERE provider = ? AND account_id = ? AND user_id = ?`, name, provider, accountID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to rename account %s: %w", accountID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return fmt.Errorf("no %s account %s for this user", provider, accountID)
+	}
+	return nil
 }
 
 // query runs a user-scoped read and scans every row.

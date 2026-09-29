@@ -22,6 +22,7 @@ import (
 
 	"github.com/mgierada/calculon/internal/auth"
 	"github.com/mgierada/calculon/internal/db"
+	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/portfolio"
 	"github.com/mgierada/calculon/internal/ui"
 )
@@ -106,8 +107,8 @@ func handler(opts Options) bubbletea.Handler {
 			return nil, nil
 		}
 
-		load := func() (portfolio.Report, error) {
-			return portfolio.Load(opts.Conn, user, opts.Report)
+		load := func(scope *model.AccountKey) (portfolio.Report, error) {
+			return portfolio.Load(opts.Conn, user, opts.Report, scope)
 		}
 		return ui.NewApp(opts.Dashboards, load), nil
 	}

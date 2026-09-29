@@ -18,7 +18,7 @@ const holdingIndexKey = "_holding"
 var positionColumns = []widgets.Column{
 	{Key: "symbol", Title: "Symbol", Flex: 2, Left: true},
 	{Key: "name", Title: "Name", Flex: 3, Left: true},
-	{Key: "account", Title: "Account", Flex: 2, Left: true},
+	{Key: "account", Title: "Account", Flex: 3, Left: true},
 	{Key: "volume", Title: "Volume", Flex: 2},
 	{Key: "avg_open", Title: "Avg open", Flex: 2},
 	{Key: "price", Title: "Price", Flex: 2},
@@ -44,7 +44,7 @@ func PositionsTable(report *portfolio.Report) *widgets.Table {
 			holdingIndexKey: i,
 			"symbol":        h.Symbol,
 			"name":          h.Name,
-			"account":       h.Account.ID,
+			"account":       h.Account.Label(),
 			"volume":        volume(h.Volume),
 			"avg_open":      price(h.AvgOpenPrice),
 			"price":         price(h.Price),

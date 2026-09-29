@@ -1,6 +1,7 @@
 package widgets
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,137 @@ func TestFormatCompact(t *testing.T) {
 	for value, want := range tests {
 		if got := formatCompact(value); got != want {
 			t.Errorf("formatCompact(%v) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+// highlightSGR is the escape sequence of the highlight background.
+const highlightSGR = "48;5;238"
+
+func TestTableHighlightsCursorRowOnlyWhenFocused(t *testing.T) {
+	table := NewTable("holdings", testColumns, []Row{
+		{"symbol": "SNT.PL", "volume": Toned("14", Positive)},
+		{"symbol": "CDR.PL", "volume": "18"},
+	})
+	table.SetSize(60, 12)
+
+	if strings.Contains(table.View(), highlightSGR) {
+		t.Error("unfocused table draws a highlighted row")
+	}
+
+	table.SetFocused(true)
+	lines := strings.Split(table.View(), "\n")
+	var highlighted []string
+	for _, line := range lines {
+		if strings.Contains(line, highlightSGR) {
+			highlighted = append(highlighted, line)
+		}
+	}
+	if len(highlighted) != 1 || !strings.Contains(highlighted[0], "SNT.PL") {
+		t.Errorf("highlighted lines = %q, want just the SNT.PL row", highlighted)
+	}
+
+	table.Update(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	for _, line := range strings.Split(table.View(), "\n") {
+		if strings.Contains(line, highlightSGR) && !strings.Contains(line, "CDR.PL") {
+			t.Errorf("after j the highlight is on %q, want the CDR.PL row", line)
+		}
+	}
+}
+
+func pickerItems(n int) []PickerItem {
+	items := make([]PickerItem, n)
+	for i := range items {
+		items[i] = PickerItem{Key: fmt.Sprintf("k%d", i), Label: fmt.Sprintf("action %d", i), Group: "G"}
+	}
+	return items
+}
+
+func pickerKey(key string) tea.KeyPressMsg {
+	switch key {
+	case "enter":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	case "esc":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
+	}
+	return tea.KeyPressMsg(tea.Key{Text: key, Code: rune(key[0])})
+}
+
+func TestPickerScrollsToKeepCursorVisible(t *testing.T) {
+	picker := NewPicker("Keybindings", "Press / to search", pickerItems(50), false)
+	picker.SetSize(80, 24)
+
+	view := picker.View()
+	if lipgloss.Height(view) > 24 || !strings.Contains(view, "action 0") || strings.Contains(view, "action 49") {
+		t.Fatalf("initial view:\n%s", view)
+	}
+	if !strings.Contains(view, "┃") {
+		t.Error("long list has no scrollbar thumb")
+	}
+
+	picker.Update(pickerKey("G"))
+	if view := picker.View(); !strings.Contains(view, "action 49") {
+		t.Errorf("after G the last item is not visible:\n%s", view)
+	}
+}
+
+func TestPickerSearchAndChoose(t *testing.T) {
+	items := []PickerItem{{Label: "All accounts"}, {Label: "IKE 51099570", Value: 2}, {Label: "USD 51727538", Value: 3}}
+	picker := NewPicker("Account", "", items, true)
+
+	for _, key := range []string{"/", "u", "s", "d", "enter"} {
+		picker.Update(pickerKey(key))
+	}
+	result, item := picker.Update(pickerKey("enter"))
+	if result != PickerChosen || item == nil || item.Value != 3 {
+		t.Errorf("chose %v %+v, want the USD account", result, item)
+	}
+}
+
+func TestPickerStartsOnCurrentItem(t *testing.T) {
+	items := []PickerItem{{Label: "a"}, {Label: "b", Current: true}, {Label: "c"}}
+	picker := NewPicker("Account", "", items, true)
+
+	if _, item := picker.Update(pickerKey("enter")); item == nil || item.Label != "b" {
+		t.Errorf("picked %+v, want the current item b", item)
+	}
+}
+
+func TestPickerNoMatches(t *testing.T) {
+	picker := NewPicker("Keybindings", "", pickerItems(3), false)
+	for _, key := range []string{"/", "z", "z", "z"} {
+		picker.Update(pickerKey(key))
+	}
+
+	if view := picker.View(); !strings.Contains(view, "no matches") {
+		t.Errorf("view:\n%s", view)
+	}
+	if result, _ := picker.Update(pickerKey("enter")); result != PickerOpen {
+		t.Error("enter in the search box closed the picker")
+	}
+	if result, _ := picker.Update(pickerKey("q")); result != PickerClosed {
+		t.Error("q after searching did not close the picker")
+	}
+}
+
+func TestPickerFitsSmallScreens(t *testing.T) {
+	picker := NewPicker("Keybindings", "Press / to search", pickerItems(50), false)
+	picker.SetSize(40, 14)
+
+	view := picker.View()
+	if w, h := lipgloss.Width(view), lipgloss.Height(view); w > 40 || h > 14 {
+		t.Errorf("picker is %dx%d, want within 40x14", w, h)
+	}
+}
+
+func TestPickerChromeDoesNotWrap(t *testing.T) {
+	picker := NewPicker("Account", "Every dashboard shows the chosen account", []PickerItem{{Label: "a"}}, true)
+	picker.SetSize(120, 30)
+
+	view := picker.View()
+	for _, want := range []string{"Every dashboard shows the chosen account", "esc/q close"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker wraps %q:\n%s", want, view)
 		}
 	}
 }

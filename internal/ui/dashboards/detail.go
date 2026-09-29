@@ -37,7 +37,7 @@ func holdingStats(h portfolio.Holding) []ui.Component {
 	ccy := h.Account.Currency
 	return []ui.Component{
 		widgets.NewStat(h.Symbol, h.Name).
-			WithNote(fmt.Sprintf("%s · %s %s", h.Category, h.Account.Provider, h.Account.ID), widgets.Muted),
+			WithNote(fmt.Sprintf("%s · %s %s", h.Category, h.Account.Provider, h.Account.Label()), widgets.Muted),
 		widgets.NewStat("Value", money(h.Value, ccy)).
 			WithNote(percent(h.Weight*100)+" of portfolio", widgets.Muted),
 		widgets.NewStat("Volume", volume(h.Volume)).
@@ -74,7 +74,7 @@ func lotsTable(h portfolio.Holding) *widgets.Table {
 func closedFor(closed []model.Owned[model.Position], h portfolio.Holding) []model.Owned[model.Position] {
 	var matching []model.Owned[model.Position]
 	for _, p := range closed {
-		if p.Account == h.Account && p.Record.Symbol == h.Symbol {
+		if p.Account.Key() == h.Account.Key() && p.Record.Symbol == h.Symbol {
 			matching = append(matching, p)
 		}
 	}
@@ -84,7 +84,7 @@ func closedFor(closed []model.Owned[model.Position], h portfolio.Holding) []mode
 func cashFor(ops []model.Owned[model.CashOp], h portfolio.Holding) []model.Owned[model.CashOp] {
 	var matching []model.Owned[model.CashOp]
 	for _, op := range ops {
-		if op.Account == h.Account && op.Record.Symbol == h.Symbol {
+		if op.Account.Key() == h.Account.Key() && op.Record.Symbol == h.Symbol {
 			matching = append(matching, op)
 		}
 	}

@@ -36,6 +36,8 @@ usage:
                                                     an ssh public key
   calculon user key NAME FILE                       let another ssh key log in as NAME
   calculon user list                                list users
+  calculon account list [--user NAME]               list a user's accounts
+  calculon account rename [--user NAME] ID NAME     label an account, e.g. IKE
 
 --user defaults to CALCULON_USER, or to the only user when there is just one.
 `
@@ -59,6 +61,8 @@ func main() {
 		err = runImport(args)
 	case "user":
 		err = runUser(args)
+	case "account":
+		err = runAccount(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -88,8 +92,8 @@ func runUI(args []string) error {
 	if err != nil {
 		return err
 	}
-	load := func() (portfolio.Report, error) {
-		return portfolio.Load(env.conn, user, env.report)
+	load := func(scope *model.AccountKey) (portfolio.Report, error) {
+		return portfolio.Load(env.conn, user, env.report, scope)
 	}
 	return ui.Run(ui.NewApp(dashboards.All(), load))
 }
@@ -269,6 +273,57 @@ func listUsers(conn *db.Conn) error {
 		fmt.Printf("%s\t%d keys\n", user.Name, user.Keys)
 	}
 	return nil
+}
+
+// runAccount lists or renames a user's accounts.
+func runAccount(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("account needs a subcommand: list or rename\n\n%s", usage)
+	}
+	subcommand, args := args[0], args[1:]
+
+	flags := flag.NewFlagSet("account "+subcommand, flag.ContinueOnError)
+	userName := flags.String("user", "", "user whose accounts to manage")
+	provider := flags.String("provider", string(model.ProviderXTB), "provider of the account")
+	positional, err := parseInterspersed(flags, args)
+	if err != nil {
+		return err
+	}
+
+	env, err := openEnv()
+	if err != nil {
+		return err
+	}
+	defer env.conn.Close()
+
+	user, err := resolveUser(env, *userName)
+	if err != nil {
+		return err
+	}
+
+	switch subcommand {
+	case "list":
+		accounts, err := db.Accounts(env.conn, user.ID)
+		if err != nil {
+			return err
+		}
+		for _, a := range accounts {
+			fmt.Printf("%s\t%s\t%s\t%s\n", a.Provider, a.ID, a.Currency, a.Name)
+		}
+		return nil
+	case "rename":
+		if len(positional) != 2 {
+			return fmt.Errorf("usage: calculon account rename [--user NAME] ID NAME")
+		}
+		if err := db.RenameAccount(env.conn, user.ID, model.Provider(*provider),
+			positional[0], positional[1]); err != nil {
+			return err
+		}
+		log.Printf("account %s is now %q", positional[0], positional[1])
+		return nil
+	default:
+		return fmt.Errorf("unknown account subcommand %q\n\n%s", subcommand, usage)
+	}
 }
 
 // env is what every command needs: configuration, the database and the

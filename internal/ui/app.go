@@ -7,7 +7,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/portfolio"
+	"github.com/mgierada/calculon/internal/ui/widgets"
 )
 
 // Keys the app handles itself. Everything else goes to the focused component.
@@ -21,6 +23,7 @@ const (
 	keyTabNext   = "]"
 	keyReload    = "r"
 	keyHelp      = "?"
+	keyAccount   = "a"
 )
 
 // chromeHeight is the header and footer line around the screen body.
@@ -38,24 +41,11 @@ var (
 	activeTabStyle = lipgloss.NewStyle().Padding(0, 1).Bold(true).
 			Foreground(lipgloss.Color("230")).Background(lipgloss.Color("62"))
 	brandStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Padding(0, 1)
+	scopeStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("116"))
 	footerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	warningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 )
-
-const helpText = `keys
-
-  1..9  [ ]      switch dashboard
-  tab shift+tab  move focus between widgets
-  ↑ ↓ j k        move within a table
-  ← → h l        change table page
-  enter          open details of the selected row
-  /              filter a table (enter to keep, esc to clear)
-  g              change what an allocation chart groups by
-  esc            close details
-  r              reload data
-  ?              toggle this help
-  q ctrl+c       quit`
 
 // reportMsg delivers a loaded report.
 type reportMsg struct {
@@ -115,7 +105,18 @@ type App struct {
 	height     int
 	report     *portfolio.Report
 	err        error
-	showHelp   bool
+	// scope is the account every dashboard shows, nil for the summary.
+	scope *model.AccountKey
+	// summaryBase is the currency of the last all-account summary.
+	summaryBase string
+	modal       *modal
+}
+
+// modal is a picker drawn over the screen, taking every key while open.
+type modal struct {
+	picker *widgets.Picker
+	// choose handles the picked item; nil for read-only pickers like help.
+	choose func(widgets.PickerItem) tea.Cmd
 }
 
 // NewApp wires dashboards to the loader that feeds them.
@@ -160,9 +161,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// View renders the header, the current screen and the footer.
+// View renders the header, the current screen and the footer, with an open
+// modal drawn over the middle of the screen.
 func (a *App) View() tea.View {
 	body := a.body()
+	if a.modal != nil {
+		body = overlay(body, a.modal.picker.View())
+	}
 	view := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, a.header(), body, a.footer()))
 	view.AltScreen = true
 	view.WindowTitle = "calculon"
@@ -177,6 +182,9 @@ func (a *App) handleReport(msg reportMsg) tea.Cmd {
 		return nil
 	}
 	a.report = &msg.report
+	if a.report.Scope == nil {
+		a.summaryBase = a.report.Base
+	}
 	a.stack = nil
 	a.tabs = make([]*screen, len(a.dashboards))
 	cmds := make([]tea.Cmd, len(a.dashboards))
@@ -194,6 +202,9 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if key == keyForceQuit {
 		return tea.Quit
 	}
+	if a.modal != nil {
+		return a.updateModal(msg)
+	}
 	current := a.current()
 	if capturer, ok := focusedOf(current).(InputCapturer); ok && capturer.CapturingInput() {
 		return current.focused().Update(msg)
@@ -203,7 +214,13 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case keyQuit:
 		return tea.Quit
 	case keyHelp:
-		a.showHelp = !a.showHelp
+		a.openModal(&modal{picker: widgets.NewPicker("Keybindings", "Press / to search",
+			helpItems(), false)})
+		return nil
+	case keyAccount:
+		if a.report != nil {
+			a.openModal(a.accountPicker())
+		}
 		return nil
 	case keyReload:
 		return a.reload()
@@ -215,10 +232,6 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		a.selectTab(a.active + step)
 		return nil
 	case keyBack:
-		if a.showHelp {
-			a.showHelp = false
-			return nil
-		}
 		if len(a.stack) > 0 {
 			a.stack = a.stack[:len(a.stack)-1]
 			return nil
@@ -244,13 +257,68 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// reload fetches a new report off the UI loop.
+// reload fetches a new report for the current scope off the UI loop.
 func (a *App) reload() tea.Cmd {
-	load := a.load
+	load, scope := a.load, a.scope
 	return func() tea.Msg {
-		report, err := load()
+		report, err := load(scope)
 		return reportMsg{report: report, err: err}
 	}
+}
+
+func (a *App) openModal(m *modal) {
+	a.modal = m
+	m.picker.SetSize(a.bodySize())
+}
+
+// updateModal sends a key to the open picker and acts on its result.
+func (a *App) updateModal(msg tea.KeyPressMsg) tea.Cmd {
+	result, item := a.modal.picker.Update(msg)
+	switch result {
+	case widgets.PickerClosed:
+		a.modal = nil
+	case widgets.PickerChosen:
+		choose := a.modal.choose
+		a.modal = nil
+		if choose != nil && item != nil {
+			return choose(*item)
+		}
+	}
+	return nil
+}
+
+// accountPicker lists the summary and every account; picking one rescopes
+// every dashboard to it.
+func (a *App) accountPicker() *modal {
+	items := []widgets.PickerItem{{
+		Label: "All accounts — summary in " + a.summaryCurrency(), Current: a.scope == nil,
+	}}
+	for _, account := range a.report.Available {
+		key := account.Key()
+		items = append(items, widgets.PickerItem{
+			Label:   fmt.Sprintf("%s — %s", account.Label(), account.Currency),
+			Value:   key,
+			Current: a.scope != nil && *a.scope == key,
+		})
+	}
+	return &modal{
+		picker: widgets.NewPicker("Account", "Every dashboard shows the chosen account", items, true),
+		choose: func(item widgets.PickerItem) tea.Cmd {
+			if key, ok := item.Value.(model.AccountKey); ok {
+				a.scope = &key
+			} else {
+				a.scope = nil
+			}
+			return a.reload()
+		},
+	}
+}
+
+// summaryCurrency is the base currency all-account totals are shown in,
+// remembered from the last summary report since a scoped one is valued in its
+// account's own currency instead.
+func (a *App) summaryCurrency() string {
+	return a.summaryBase
 }
 
 // push opens a drill-down screen.
@@ -288,6 +356,9 @@ func focusedOf(s *screen) Component {
 
 func (a *App) resize() {
 	width, height := a.bodySize()
+	if a.modal != nil {
+		a.modal.picker.SetSize(width, height)
+	}
 	for _, tab := range a.tabs {
 		tab.root.SetSize(width, height)
 	}
@@ -306,8 +377,6 @@ func (a *App) body() string {
 		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 	}
 	switch {
-	case a.showHelp:
-		return place(helpText)
 	case a.err != nil:
 		return place(errorStyle.Render(a.err.Error()) + "\n\npress r to retry, q to quit")
 	case a.report == nil:
@@ -334,14 +403,19 @@ func (a *App) header() string {
 
 	var right string
 	if a.report != nil {
-		right = footerStyle.Render(a.report.User + " ")
+		scope := "All accounts"
+		if a.report.Scope != nil {
+			scope = a.report.Scope.Label()
+		}
+		right = footerStyle.Render("account ") + scopeStyle.Render(scope) +
+			footerStyle.Render(" · "+a.report.User+" ")
 	}
 	return fill(left, right, a.width)
 }
 
 // footer shows data freshness, FX provenance, warnings and a key hint.
 func (a *App) footer() string {
-	hint := footerStyle.Render("? help · q quit ")
+	hint := footerStyle.Render("? help · a account · q quit ")
 	if a.report == nil {
 		return fill("", hint, a.width)
 	}
@@ -355,6 +429,16 @@ func (a *App) footer() string {
 		left += warningStyle.Render(" · ⚠ " + a.report.Warnings[0])
 	}
 	return fill(left, hint, a.width)
+}
+
+// overlay draws top centred over base.
+func overlay(base, top string) string {
+	x := max((lipgloss.Width(base)-lipgloss.Width(top))/2, 0)
+	y := max((lipgloss.Height(base)-lipgloss.Height(top))/2, 0)
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(base),
+		lipgloss.NewLayer(top).X(x).Y(y).Z(1),
+	).Render()
 }
 
 // fill lays out left and right parts on one line of the given width, truncating

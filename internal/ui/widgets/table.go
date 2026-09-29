@@ -17,6 +17,7 @@ var (
 	unfocusedBorder = lipgloss.Color("240")
 	headerColor     = lipgloss.Color("212")
 	mutedColor      = lipgloss.Color("245")
+	highlightColor  = lipgloss.Color("238")
 	positiveColor   = lipgloss.Color("42")
 	negativeColor   = lipgloss.Color("203")
 )
@@ -84,6 +85,9 @@ func NewTable(title string, columns []Column, rows []Row) *Table {
 		WithRows(toRows(rows)).
 		WithBaseStyle(lipgloss.NewStyle().Align(lipgloss.Right)).
 		HeaderStyle(lipgloss.NewStyle().Foreground(headerColor).Bold(true)).
+		// bubble-table draws no cursor by default, so the row enter would open
+		// is invisible. Coloured cells keep their colour over the background.
+		HighlightStyle(lipgloss.NewStyle().Background(highlightColor).Bold(true)).
 		Focused(false)
 
 	widget := &Table{table: model, title: title, columns: columns, rows: rows}

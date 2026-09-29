@@ -51,7 +51,7 @@ func Allocation(report Report, grouping Grouping) []Slice {
 		cash := account.CashBase
 		switch grouping {
 		case ByAccount:
-			values[account.ID] += cash
+			values[account.Label()] += cash
 		case ByCurrency:
 			values[account.Currency] += cash
 		default:
@@ -92,7 +92,7 @@ func TopSlices(slices []Slice, n int) []Slice {
 func groupLabel(h Holding, grouping Grouping) string {
 	switch grouping {
 	case ByAccount:
-		return h.Account.ID
+		return h.Account.Label()
 	case ByCategory:
 		return h.Category
 	case ByCurrency:

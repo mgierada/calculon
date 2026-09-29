@@ -60,6 +60,28 @@ type Account struct {
 	// Currency is the currency the account is denominated in and every amount
 	// and price in its records is expressed in.
 	Currency string
+	// Name is a human label such as "IKE". It is optional and never part of
+	// the account's identity.
+	Name string
+}
+
+// AccountKey is what identifies an account.
+type AccountKey struct {
+	Provider Provider
+	ID       string
+}
+
+// Key identifies the account regardless of its label.
+func (a Account) Key() AccountKey {
+	return AccountKey{Provider: a.Provider, ID: a.ID}
+}
+
+// Label is how the account is shown: its name and id, or just the id.
+func (a Account) Label() string {
+	if a.Name == "" {
+		return a.ID
+	}
+	return a.Name + " " + a.ID
 }
 
 // Validate checks the invariants the database and UI rely on.

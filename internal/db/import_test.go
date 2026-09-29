@@ -330,3 +330,78 @@ func TestMigrateRefusesOldSchema(t *testing.T) {
 		t.Errorf("journal mode after refusal = %q, want the untouched default", mode)
 	}
 }
+
+func TestMigrateUpgradesVersion2(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)`,
+		`CREATE TABLE accounts (provider TEXT NOT NULL, account_id TEXT NOT NULL,
+			user_id INTEGER NOT NULL, currency TEXT NOT NULL, snapshot_as_of TEXT,
+			PRIMARY KEY (provider, account_id))`,
+		`INSERT INTO users VALUES (1, 'alice', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO accounts VALUES ('xtb', '50747414', 1, 'PLN', NULL)`,
+		`PRAGMA user_version = 2`,
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("building v2 database: %v", err)
+		}
+	}
+	raw.Close()
+
+	conn, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on a v2 database returned error: %v", err)
+	}
+	defer conn.Close()
+
+	accounts, err := Accounts(conn, 1)
+	if err != nil {
+		t.Fatalf("Accounts returned error: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].ID != "50747414" || accounts[0].Name != "" {
+		t.Errorf("accounts after migration = %+v, want the old row with an empty name", accounts)
+	}
+}
+
+func TestImportNamesAccountButKeepsRenames(t *testing.T) {
+	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	statement := testStatement()
+	statement.Account.Name = "PLN"
+	mustImport(t, conn, user.ID, statement)
+
+	if err := RenameAccount(conn, user.ID, model.ProviderXTB, testAccount.ID, "main"); err != nil {
+		t.Fatalf("RenameAccount returned error: %v", err)
+	}
+	mustImport(t, conn, user.ID, statement)
+
+	accounts, err := Accounts(conn, user.ID)
+	if err != nil {
+		t.Fatalf("Accounts returned error: %v", err)
+	}
+	if accounts[0].Name != "main" {
+		t.Errorf("name after re-import = %q, want the rename kept", accounts[0].Name)
+	}
+	lots, err := OpenLots(conn, user.ID)
+	if err != nil {
+		t.Fatalf("OpenLots returned error: %v", err)
+	}
+	if lots[0].Account.Name != "main" {
+		t.Errorf("lot account name = %q, want it read with the record", lots[0].Account.Name)
+	}
+}
+
+func TestRenameAccountIsScopedToOwner(t *testing.T) {
+	conn := openTestDB(t)
+	alice := createTestUser(t, conn, "alice")
+	bob := createTestUser(t, conn, "bob")
+	mustImport(t, conn, alice.ID, testStatement())
+
+	if err := RenameAccount(conn, bob.ID, model.ProviderXTB, testAccount.ID, "mine"); err == nil {
+		t.Fatal("bob renamed alice's account")
+	}
+}

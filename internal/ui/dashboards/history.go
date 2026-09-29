@@ -49,7 +49,7 @@ func ClosedTable(title string, closed []model.Owned[model.Position]) *widgets.Ta
 		rows = append(rows, widgets.Row{
 			"closed":  date(p.CloseTime),
 			"symbol":  p.Symbol,
-			"account": owned.Account.ID,
+			"account": owned.Account.Label(),
 			"volume":  volume(p.Volume),
 			"open":    price(p.OpenPrice),
 			"close":   price(p.ClosePrice),
@@ -68,7 +68,7 @@ func CashTable(title string, ops []model.Owned[model.CashOp]) *widgets.Table {
 		op := owned.Record
 		rows = append(rows, widgets.Row{
 			"time":    date(op.Time),
-			"account": owned.Account.ID,
+			"account": owned.Account.Label(),
 			"kind":    op.RawType,
 			"symbol":  op.Symbol,
 			"amount":  widgets.Toned(signedMoney(op.Amount, owned.Account.Currency), widgets.ToneOf(op.Amount)),

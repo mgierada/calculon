@@ -111,8 +111,8 @@ func ensureAccount(tx *sql.Tx, userID int64, account model.Account) (time.Time, 
 		WHERE provider = ? AND account_id = ?`, account.Provider, account.ID).
 		Scan(&ownerID, &currency, &asOf)
 	if errors.Is(err, sql.ErrNoRows) {
-		_, err := tx.Exec(`INSERT INTO accounts (provider, account_id, user_id, currency)
-			VALUES (?, ?, ?, ?)`, account.Provider, account.ID, userID, account.Currency)
+		_, err := tx.Exec(`INSERT INTO accounts (provider, account_id, user_id, currency, name)
+			VALUES (?, ?, ?, ?, ?)`, account.Provider, account.ID, userID, account.Currency, account.Name)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("failed to register account %s: %w", account.ID, err)
 		}
@@ -127,6 +127,12 @@ func ensureAccount(tx *sql.Tx, userID int64, account model.Account) (time.Time, 
 	if currency != account.Currency {
 		return time.Time{}, fmt.Errorf("account %s is stored in %s, statement says %s",
 			account.ID, currency, account.Currency)
+	}
+	// Name accounts imported before names existed, never overwriting a rename.
+	if _, err := tx.Exec(`UPDATE accounts SET name = ?
+		WHERE provider = ? AND account_id = ? AND name = ''`,
+		account.Name, account.Provider, account.ID); err != nil {
+		return time.Time{}, fmt.Errorf("failed to name account %s: %w", account.ID, err)
 	}
 	return parseTime(asOf)
 }

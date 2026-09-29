@@ -93,16 +93,20 @@ type ValuePoint struct {
 
 // Report is what the dashboards render.
 type Report struct {
-	User     string
-	Base     string
-	FXNote   string
-	AsOf     time.Time
-	Accounts []AccountSummary
-	Holdings []Holding
-	Totals   Totals
-	History  []ValuePoint
-	Closed   []model.Owned[model.Position]
-	CashOps  []model.Owned[model.CashOp]
+	User string
+	// Scope is the account the report covers, nil for the summary of all of
+	// them. Available lists every account the user has, whatever the scope.
+	Scope     *model.Account
+	Available []model.AccountSnapshot
+	Base      string
+	FXNote    string
+	AsOf      time.Time
+	Accounts  []AccountSummary
+	Holdings  []Holding
+	Totals    Totals
+	History   []ValuePoint
+	Closed    []model.Owned[model.Position]
+	CashOps   []model.Owned[model.CashOp]
 	// Warnings are data problems worth surfacing, e.g. a missing FX rate.
 	Warnings []string
 }
@@ -115,12 +119,13 @@ func Build(in Input, opts Options) Report {
 	conv := converter{fx: opts.FX, missing: map[string]bool{}}
 
 	report := Report{
-		User:    in.User,
-		Base:    opts.FX.Base(),
-		FXNote:  opts.FX.Describe(),
-		AsOf:    latestSnapshot(in.Accounts),
-		Closed:  in.Closed,
-		CashOps: in.CashOps,
+		User:      in.User,
+		Available: in.Accounts,
+		Base:      opts.FX.Base(),
+		FXNote:    opts.FX.Describe(),
+		AsOf:      latestSnapshot(in.Accounts),
+		Closed:    in.Closed,
+		CashOps:   in.CashOps,
 	}
 	report.Holdings = buildHoldings(in.Lots, opts.Prices, conv)
 	report.Accounts = summarizeAccounts(in.Accounts, report.Holdings, in.CashOps, conv)
@@ -194,18 +199,18 @@ func valueHolding(h *Holding, prices PriceSource, conv converter) {
 func summarizeAccounts(accounts []model.AccountSnapshot, holdings []Holding,
 	cashOps []model.Owned[model.CashOp], conv converter) []AccountSummary {
 	summaries := make([]AccountSummary, len(accounts))
-	index := map[model.Account]int{}
+	index := map[model.AccountKey]int{}
 	for i, account := range accounts {
 		summaries[i] = AccountSummary{AccountSnapshot: account}
-		index[account.Account] = i
+		index[account.Key()] = i
 	}
 	for _, op := range cashOps {
-		if i, ok := index[op.Account]; ok {
+		if i, ok := index[op.Account.Key()]; ok {
 			summaries[i].Cash += op.Record.Amount
 		}
 	}
 	for _, h := range holdings {
-		if i, ok := index[h.Account]; ok {
+		if i, ok := index[h.Account.Key()]; ok {
 			summaries[i].PositionsValue += h.Value
 		}
 	}

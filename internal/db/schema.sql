@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     account_id     TEXT NOT NULL,
     user_id        INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     currency       TEXT NOT NULL,
+    -- A human label such as "IKE"; set from the statement on first import and
+    -- changed with `calculon account rename`.
+    name           TEXT NOT NULL DEFAULT '',
     -- When the stored open_lots snapshot was taken; NULL before the first one.
     snapshot_as_of TEXT,
     PRIMARY KEY (provider, account_id)

@@ -273,3 +273,32 @@ func TestParseRates(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeKeepsOneAccountInItsCurrency(t *testing.T) {
+	in, opts, ok := Scope(testInput(), Options{FX: fx}, usd.Key())
+	if !ok {
+		t.Fatal("Scope did not find the USD account")
+	}
+	report := Build(in, opts)
+
+	if report.Base != "USD" {
+		t.Errorf("base = %q, want the account's own currency", report.Base)
+	}
+	if len(report.Holdings) != 1 || report.Holdings[0].Symbol != "AAPL.US" {
+		t.Errorf("holdings = %+v, want only AAPL.US", report.Holdings)
+	}
+	// 2 * 250 in positions plus 100 cash, unconverted.
+	if !near(report.Totals.Total, 600) || !near(report.Totals.Contributions, 500) {
+		t.Errorf("totals = %+v, want total 600 and deposits 500 USD", report.Totals)
+	}
+	if !near(report.Holdings[0].Weight, 500.0/600) {
+		t.Errorf("weight = %v, want share of this account only", report.Holdings[0].Weight)
+	}
+}
+
+func TestScopeUnknownAccount(t *testing.T) {
+	missing := model.AccountKey{Provider: model.ProviderXTB, ID: "nope"}
+	if _, _, ok := Scope(testInput(), Options{FX: fx}, missing); ok {
+		t.Error("Scope found an account the user does not have")
+	}
+}

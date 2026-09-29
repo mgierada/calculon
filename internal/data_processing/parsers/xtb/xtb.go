@@ -45,6 +45,11 @@ var productCurrencies = map[string]string{"IKE": "PLN", "IKZE": "PLN"}
 // e.g. "USD_51727538_2006-01-01_2026-09-28.xlsx".
 var currencyCode = regexp.MustCompile(`^([A-Z]{3})_`)
 
+// accountName matches the label XTB puts before the account number in a
+// statement file name: the currency for a regular account, the product for
+// a sub-account, e.g. "IKE_51099570_2006-01-01_2026-09-28.xlsx".
+var accountName = regexp.MustCompile(`^([A-Za-z]+)_[0-9]+_`)
+
 // Parser reads XTB xlsx account statements.
 type Parser struct{}
 
@@ -125,6 +130,9 @@ func parseAccount(sheets map[string][][]string, fileName string) (model.Account,
 		return model.Account{}, fmt.Errorf("account number not found in any sheet header")
 	}
 
+	if match := accountName.FindStringSubmatch(fileName); match != nil {
+		account.Name = match[1]
+	}
 	account.Currency = parseCurrency(sheets, fileName)
 	if account.Currency == "" {
 		return model.Account{}, fmt.Errorf("account %s: cannot determine currency", account.ID)

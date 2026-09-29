@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/portfolio"
 )
 
@@ -39,8 +40,16 @@ var (
 	escKey = tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
 )
 
+var (
+	plnAccount = model.Account{Provider: model.ProviderXTB, ID: "50747414", Currency: "PLN", Name: "PLN"}
+	ikeAccount = model.Account{Provider: model.ProviderXTB, ID: "51099570", Currency: "PLN", Name: "IKE"}
+)
+
 func testReport() portfolio.Report {
-	return portfolio.Report{User: "alice", FXNote: "static FX"}
+	return portfolio.Report{
+		User: "alice", FXNote: "static FX", Base: "PLN",
+		Available: []model.AccountSnapshot{{Account: plnAccount}, {Account: ikeAccount}},
+	}
 }
 
 // loadedApp is an app whose report has arrived, with one dashboard per root.
@@ -51,13 +60,13 @@ func loadedApp(t *testing.T, roots ...Component) *App {
 	for i, root := range roots {
 		dashboards[i] = Dashboard{Title: root.View(), Build: func(*portfolio.Report) Component { return root }}
 	}
-	app := NewApp(dashboards, func() (portfolio.Report, error) { return testReport(), nil })
+	app := NewApp(dashboards, func(*model.AccountKey) (portfolio.Report, error) { return testReport(), nil })
 	app.Update(reportMsg{report: testReport()})
 	return app
 }
 
 func TestAppLoadsReportOnInit(t *testing.T) {
-	app := NewApp(nil, func() (portfolio.Report, error) { return testReport(), nil })
+	app := NewApp(nil, func(*model.AccountKey) (portfolio.Report, error) { return testReport(), nil })
 
 	msg := app.Init()()
 	if got, ok := msg.(reportMsg); !ok || got.report.User != "alice" {
@@ -223,5 +232,74 @@ func TestAppViewIsFullscreen(t *testing.T) {
 	}
 	if !strings.Contains(view.Content, "alice") {
 		t.Errorf("header does not name the user:\n%s", view.Content)
+	}
+}
+
+func TestAppHelpIsAModalTakingKeys(t *testing.T) {
+	table := &keyStub{stub: stub{name: "table"}}
+	app := loadedApp(t, table)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	app.Update(press("?"))
+	view := app.View().Content
+	if !strings.Contains(view, "Keybindings") || !strings.Contains(view, "choose account") {
+		t.Fatalf("help modal not shown:\n%s", view)
+	}
+
+	// Keys go to the modal, not the table behind it: search for "quit".
+	for _, key := range []string{"/", "q", "u", "i", "t"} {
+		app.Update(press(key))
+	}
+	view = app.View().Content
+	if len(table.keys) != 0 {
+		t.Errorf("table behind the modal received %v", table.keys)
+	}
+	if strings.Contains(view, "reload data") || !strings.Contains(view, "q / ctrl+c") {
+		t.Errorf("search did not narrow help to quit:\n%s", view)
+	}
+
+	app.Update(escKey) // clear the search
+	app.Update(escKey) // close
+	if app.modal != nil {
+		t.Error("esc did not close the help modal")
+	}
+}
+
+func TestAppAccountPickerRescopesAndReloads(t *testing.T) {
+	var requested []*model.AccountKey
+	dashboards := []Dashboard{{Title: "x", Build: func(*portfolio.Report) Component { return &stub{name: "x"} }}}
+	app := NewApp(dashboards, func(scope *model.AccountKey) (portfolio.Report, error) {
+		requested = append(requested, scope)
+		report := testReport()
+		if scope != nil {
+			report.Scope = &ikeAccount
+		}
+		return report, nil
+	})
+	app.Update(app.Init()())
+
+	app.Update(press("a"))
+	app.Update(press("j"))
+	app.Update(press("j"))
+	_, cmd := app.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("picking an account did not reload")
+	}
+	app.Update(cmd())
+
+	if last := requested[len(requested)-1]; last == nil || *last != ikeAccount.Key() {
+		t.Errorf("reload scope = %v, want the IKE account", last)
+	}
+	if view := app.View().Content; !strings.Contains(view, "IKE 51099570") {
+		t.Errorf("header does not name the chosen account:\n%s", view)
+	}
+
+	// The summary is the first entry and brings the unscoped report back.
+	app.Update(press("a"))
+	app.Update(press("g"))
+	_, cmd = app.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	app.Update(cmd())
+	if last := requested[len(requested)-1]; last != nil {
+		t.Errorf("reload scope = %v, want the summary", last)
 	}
 }

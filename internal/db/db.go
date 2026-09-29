@@ -17,8 +17,14 @@ import (
 var schemaFS embed.FS
 
 // schemaVersion is stored in SQLite's user_version. Bump it whenever
-// schema.sql changes in a way CREATE IF NOT EXISTS cannot apply.
-const schemaVersion = 2
+// schema.sql changes in a way CREATE IF NOT EXISTS cannot apply, and add the
+// statement that upgrades the previous version to migrations.
+const schemaVersion = 3
+
+// migrations upgrade a database from the version they are keyed by to the next.
+var migrations = map[int]string{
+	2: `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''`,
+}
 
 // timeLayout is how timestamps are stored, chosen so text ordering matches
 // chronological ordering.
@@ -63,34 +69,58 @@ func checkCompatible(dbPath string) error {
 		return err
 	}
 	defer conn.Close()
-	return compatible(conn)
+	_, err = compatible(conn)
+	return err
 }
 
-// compatible accepts an empty database or one at the current schema version.
-func compatible(conn *sql.DB) error {
+// compatible accepts an empty database, one at the current schema version, and
+// one the migrations can upgrade. It returns the version found, zero when empty.
+func compatible(conn *sql.DB) (int, error) {
 	var version int
 	if err := conn.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("failed to read schema version: %w", err)
+		return 0, fmt.Errorf("failed to read schema version: %w", err)
 	}
-	if version == schemaVersion {
-		return nil
+	if version == schemaVersion || upgradable(version) {
+		return version, nil
 	}
 	empty, err := isEmpty(conn)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !empty {
-		return fmt.Errorf("%w: found version %d, want %d; re-create it with `make reset-db`",
+		return 0, fmt.Errorf("%w: found version %d, want %d; re-create it with `make reset-db`",
 			ErrIncompatibleSchema, version, schemaVersion)
 	}
-	return nil
+	return 0, nil
 }
 
-// Migrate creates any missing tables and indexes. It refuses a database from an
-// older schema version rather than guessing how to convert it.
+// upgradable reports whether migrations lead from version to the current one.
+func upgradable(version int) bool {
+	if version <= 0 || version > schemaVersion {
+		return false
+	}
+	for v := version; v < schemaVersion; v++ {
+		if _, ok := migrations[v]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// Migrate upgrades an older schema step by step, then creates any missing
+// tables and indexes. It refuses a database it has no migration for rather
+// than guessing how to convert it.
 func Migrate(conn *sql.DB) error {
-	if err := compatible(conn); err != nil {
+	version, err := compatible(conn)
+	if err != nil {
 		return err
+	}
+	if version > 0 {
+		for v := version; v < schemaVersion; v++ {
+			if _, err := conn.Exec(migrations[v]); err != nil {
+				return fmt.Errorf("failed to migrate schema from version %d: %w", v, err)
+			}
+		}
 	}
 
 	schema, err := schemaFS.ReadFile("schema.sql")

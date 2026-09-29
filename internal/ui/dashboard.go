@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/portfolio"
 )
 
@@ -12,5 +13,7 @@ type Dashboard struct {
 	Build func(report *portfolio.Report) Component
 }
 
-// Loader produces the report the dashboards render. It runs off the UI loop.
-type Loader func() (portfolio.Report, error)
+// Loader produces the report the dashboards render: the summary of every
+// account when scope is nil, otherwise that one account. It runs off the UI
+// loop.
+type Loader func(scope *model.AccountKey) (portfolio.Report, error)

@@ -93,7 +93,7 @@ func parseTestStatement(t *testing.T, fileName string) model.Statement {
 func TestParseAccountPrefersHistorySheets(t *testing.T) {
 	statement := parseTestStatement(t, "IKE_51099570_2006-01-01_2026-09-28.xlsx")
 
-	want := model.Account{Provider: model.ProviderXTB, ID: "51099570", Currency: "PLN"}
+	want := model.Account{Provider: model.ProviderXTB, ID: "51099570", Currency: "PLN", Name: "IKE"}
 	if statement.Account != want {
 		t.Errorf("account = %+v, want %+v", statement.Account, want)
 	}
@@ -252,5 +252,13 @@ func TestParseFailsOnMalformedRow(t *testing.T) {
 func TestParseFailsWithoutAccount(t *testing.T) {
 	if _, err := parseSheets(map[string][][]string{"x": {{"nothing"}}}, "PLN_1.xlsx"); err == nil {
 		t.Fatal("parseSheets succeeded without an account number")
+	}
+}
+
+func TestParseAccountWithoutNamedFile(t *testing.T) {
+	statement := parseTestStatement(t, "statement.xlsx")
+
+	if statement.Account.Name != "" {
+		t.Errorf("name = %q, want none from an unlabelled file name", statement.Account.Name)
 	}
 }

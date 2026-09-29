@@ -62,7 +62,7 @@ func AccountsTable(report *portfolio.Report) *widgets.Table {
 	rows := make([]widgets.Row, 0, len(report.Accounts))
 	for _, a := range report.Accounts {
 		rows = append(rows, widgets.Row{
-			"account":    string(a.Provider) + " " + a.ID,
+			"account":    string(a.Provider) + " " + a.Label(),
 			"currency":   a.Currency,
 			"positions":  money(a.PositionsValue, ""),
 			"cash":       money(a.Cash, ""),
