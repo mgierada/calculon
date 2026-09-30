@@ -211,3 +211,27 @@ func TestReturnStat(t *testing.T) {
 		t.Errorf("return card without enough history:\n%s", view)
 	}
 }
+
+func TestPositionsStartSortedByPLDescending(t *testing.T) {
+	report := testReport()
+	table := PositionsTable(report)
+	table.SetSize(200, 20)
+	table.SetFocused(true)
+
+	// SNT.PL gains 464 while CDR.PL loses 50, so SNT.PL leads.
+	view := table.View()
+	if !strings.Contains(view, "P/L ▼") {
+		t.Errorf("P/L column is not marked as the sort:\n%s", view)
+	}
+	cmd := table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if push, ok := cmd().(ui.PushMsg); !ok || push.Title != "SNT.PL" {
+		t.Errorf("top row opens %+v, want SNT.PL, the biggest P/L", cmd())
+	}
+
+	// Reversed, the loss comes first, which ordering by value never gives.
+	table.Update(tea.KeyPressMsg(tea.Key{Text: "S", Code: 'S'}))
+	cmd = table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if push, ok := cmd().(ui.PushMsg); !ok || push.Title != "CDR.PL" {
+		t.Errorf("after S the top row opens %+v, want CDR.PL, the loss", cmd())
+	}
+}

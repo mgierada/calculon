@@ -40,6 +40,20 @@ func (t *Table) Sortable() *Table {
 	return t
 }
 
+// SortedBy makes the table sortable and orders it by a column to begin with.
+// An unknown column leaves the rows in the order given.
+func (t *Table) SortedBy(column string, desc bool) *Table {
+	t.Sortable()
+	for i, c := range t.columns {
+		if c.Key == column {
+			t.sortColumn, t.sortDesc = i, desc
+			t.applySort()
+			break
+		}
+	}
+	return t
+}
+
 // handleSortKey applies a sort key, reporting whether it was one.
 func (t *Table) handleSortKey(key string) bool {
 	if !t.sortable || t.CapturingInput() || len(t.columns) == 0 {

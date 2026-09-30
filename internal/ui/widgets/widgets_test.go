@@ -437,3 +437,18 @@ func TestUnsortableTableIgnoresSortKeys(t *testing.T) {
 		t.Errorf("top row = %v, want b: an unsortable table keeps the given order", row)
 	}
 }
+
+func TestTableStartsSortedBy(t *testing.T) {
+	table := sortTestTable().SortedBy("value", true)
+
+	if got := strings.Join(order(t, table), ","); got != "A.PL,b.PL,C.PL" {
+		t.Errorf("initial order = %s, want by value, largest first", got)
+	}
+	if !strings.Contains(table.View(), "Value ▼") {
+		t.Error("initial sort column is not marked")
+	}
+	table.Update(sortKey("S"))
+	if got := strings.Join(order(t, table), ","); got != "C.PL,b.PL,A.PL" {
+		t.Errorf("after S = %s, want the initial sort reversed", got)
+	}
+}

@@ -60,7 +60,8 @@ func PositionsTable(report *portfolio.Report) *widgets.Table {
 	title := fmt.Sprintf("open positions — %d holdings · enter details · / filter · s sort", len(rows))
 	return widgets.NewTable(title, positionColumns, rows).
 		Filterable().
-		Sortable().
+		// Biggest winners first; s and S re-sort from there.
+		SortedBy("pl", true).
 		OnSelect(func(row widgets.Row) tea.Cmd {
 			i, ok := row[holdingIndexKey].(int)
 			if !ok || i >= len(report.Holdings) {
