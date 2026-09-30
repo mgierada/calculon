@@ -40,8 +40,10 @@ type Delta struct {
 	Known  bool
 }
 
-// Holding is the open exposure to one symbol in one account, in the account's
-// currency, plus its value in the base currency.
+// Holding is the open exposure to one symbol in one account. Price and
+// AvgOpenPrice are in the instrument's own currency, as the broker quotes them;
+// CostBasis, Value, PL and Day are in the account's currency, and ValueBase in
+// the base currency.
 type Holding struct {
 	Account model.Account
 	model.Instrument
@@ -49,15 +51,21 @@ type Holding struct {
 	AvgOpenPrice float64
 	CostBasis    float64
 	Price        float64
-	PriceAsOf    time.Time
-	Value        float64
-	PL           Delta
-	Day          Delta
-	ValueBase    float64
+	// Conversion is the latest rate from the instrument's currency into the
+	// account's, 1 when they are the same.
+	Conversion float64
+	PriceAsOf  time.Time
+	Value      float64
+	PL         Delta
+	Day        Delta
+	ValueBase  float64
 	// Weight is the holding's share of the whole portfolio, cash included.
 	Weight    float64
 	FirstOpen time.Time
 	Lots      []model.OpenLot
+	// LotCosts is what each lot cost in the account's currency, at the rate
+	// of the day it opened, in the same order as Lots.
+	LotCosts []float64
 }
 
 // AccountSummary totals one account in its own currency.
@@ -106,6 +114,7 @@ type Report struct {
 	Holdings  []Holding
 	Totals    Totals
 	History   []ValuePoint
+	Returns   Returns
 	Closed    []model.Owned[model.Position]
 	CashOps   []model.Owned[model.CashOp]
 	// Warnings are data problems worth surfacing, e.g. a missing FX rate.
@@ -128,11 +137,13 @@ func Build(in Input, opts Options) Report {
 		Closed:    in.Closed,
 		CashOps:   in.CashOps,
 	}
-	report.Holdings = buildHoldings(in.Lots, opts.Prices, conv)
+	rates := newConversions(in)
+	report.Holdings = buildHoldings(in.Lots, opts.Prices, rates, conv)
 	report.Accounts = summarizeAccounts(in.Accounts, report.Holdings, in.CashOps, conv)
 	report.Totals = totals(report, in, conv)
 	assignWeights(report.Holdings, report.Totals.Total)
-	report.History = valueHistory(in, conv, report.AsOf)
+	report.History = valueHistory(in, rates, conv, report.AsOf)
+	report.Returns = computeReturns(report.History)
 	report.Warnings = conv.warnings()
 	return report
 }
@@ -140,10 +151,14 @@ func Build(in Input, opts Options) Report {
 // buildHoldings groups open lots by account and symbol, valued at the latest
 // price. CFD lots are left out: their notional is not owned, and their profit
 // already reaches the cash ledger when they close.
-func buildHoldings(lots []model.Owned[model.OpenLot], prices PriceSource, conv converter) []Holding {
+func buildHoldings(lots []model.Owned[model.OpenLot], prices PriceSource, rates conversions,
+	conv converter) []Holding {
 	type key struct{ provider, account, symbol string }
 	index := map[key]int{}
 	var holdings []Holding
+	// instrumentCost is each holding's cost in the instrument's own currency,
+	// which its average open price is quoted in.
+	var instrumentCost []float64
 	for _, owned := range lots {
 		lot := owned.Record
 		if lot.Category == model.CategoryCFD {
@@ -157,10 +172,15 @@ func buildHoldings(lots []model.Owned[model.OpenLot], prices PriceSource, conv c
 			holdings = append(holdings, Holding{
 				Account: owned.Account, Instrument: lot.Instrument, FirstOpen: lot.OpenTime,
 			})
+			instrumentCost = append(instrumentCost, 0)
 		}
 		h := &holdings[i]
 		h.Volume += lot.Volume
-		h.CostBasis += lot.CostBasis()
+		// Each lot cost what it did in account currency on the day it opened.
+		lotCost := lot.CostBasis() * rates.at(keyOf(owned.Account, lot.Symbol), lot.OpenTime)
+		h.CostBasis += lotCost
+		h.LotCosts = append(h.LotCosts, lotCost)
+		instrumentCost[i] += lot.CostBasis()
 		h.Lots = append(h.Lots, lot)
 		if lot.OpenTime.Before(h.FirstOpen) {
 			h.FirstOpen = lot.OpenTime
@@ -171,7 +191,12 @@ func buildHoldings(lots []model.Owned[model.OpenLot], prices PriceSource, conv c
 	}
 
 	for i := range holdings {
-		valueHolding(&holdings[i], prices, conv)
+		h := &holdings[i]
+		h.Conversion = rates.latest(keyOf(h.Account, h.Symbol))
+		if h.Volume > 0 {
+			h.AvgOpenPrice = instrumentCost[i] / h.Volume
+		}
+		valueHolding(h, prices, conv)
 	}
 	sort.SliceStable(holdings, func(i, j int) bool {
 		return holdings[i].ValueBase > holdings[j].ValueBase
@@ -185,13 +210,10 @@ func valueHolding(h *Holding, prices PriceSource, conv converter) {
 		h.Price, h.PriceAsOf = quote.Price, quote.AsOf
 		if quote.HasPrevClose() {
 			change := (quote.Price - quote.PrevClose) * h.Volume
-			h.Day = Delta{Amount: change, Pct: pct(change, quote.PrevClose*h.Volume), Known: true}
+			h.Day = Delta{Amount: change * h.Conversion, Pct: pct(change, quote.PrevClose*h.Volume), Known: true}
 		}
 	}
-	if h.Volume > 0 {
-		h.AvgOpenPrice = h.CostBasis / h.Volume
-	}
-	h.Value = h.Volume * h.Price
+	h.Value = h.Volume * h.Price * h.Conversion
 	h.PL = Delta{Amount: h.Value - h.CostBasis, Pct: pct(h.Value-h.CostBasis, h.CostBasis), Known: true}
 	h.ValueBase = conv.toBase(h.Value, h.Account.Currency)
 }

@@ -51,10 +51,13 @@ func holdingStats(h portfolio.Holding) []ui.Component {
 
 func lotsTable(h portfolio.Holding) *widgets.Table {
 	rows := make([]widgets.Row, 0, len(h.Lots))
-	for _, lot := range h.Lots {
-		value := lot.Volume * h.Price
-		pl := portfolio.Delta{Amount: value - lot.CostBasis(), Known: true}
-		if cost := lot.CostBasis(); cost != 0 {
+	for i, lot := range h.Lots {
+		// Value and P/L are in the account's currency, prices in the
+		// instrument's, matching the positions table.
+		value := lot.Volume * h.Price * h.Conversion
+		cost := h.LotCosts[i]
+		pl := portfolio.Delta{Amount: value - cost, Known: true}
+		if cost != 0 {
 			pl.Pct = pl.Amount / cost * 100
 		}
 		rows = append(rows, widgets.Row{

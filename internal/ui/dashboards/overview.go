@@ -35,7 +35,7 @@ func Overview(report *portfolio.Report) ui.Component {
 		{Height: stackBarHeight, Cells: ui.Cells(AllocationBar(report))},
 		{Weight: 1, Cells: []ui.Cell{
 			{Component: NewAllocationChart(report), Weight: 2},
-			{Component: ValueChart(report), Weight: 3},
+			{Component: ui.Stack(ValueChart(report), NewReturnChart(report)), Weight: 3},
 		}},
 		{Height: len(report.Accounts) + tableChrome, Cells: ui.Cells(AccountsTable(report))},
 	}}
@@ -55,6 +55,7 @@ func TotalsStats(report *portfolio.Report) []ui.Component {
 		widgets.NewStat("Realized P/L", signedMoney(t.RealizedPL, base)).
 			WithNote("dividends "+money(t.Dividends, base), widgets.Muted),
 		deltaStat("Total P/L", t.TotalPL, base, ""),
+		ReturnStat(report),
 	}
 }
 

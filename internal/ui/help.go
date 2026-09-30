@@ -44,6 +44,7 @@ var bindingGroups = []struct {
 	}},
 	{"Charts", []binding{
 		{"g", "allocation: change grouping"},
+		{"m", "returns: cycle TWR / XIRR / CAGR"},
 	}},
 }
 

@@ -1,6 +1,7 @@
 package portfolio
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -87,37 +88,63 @@ func (b QuoteBook) Latest(symbol string) (Quote, bool) {
 	return quote, true
 }
 
-// priceHistory is every price observed per symbol: stored quotes plus the
-// prices trades executed at. Between observations a symbol is marked at its
-// last known price, which is exact on trade days and an approximation between
-// them until a market data source fills in daily closes.
-type priceHistory map[string]series
+// priceHistory is every price observed per instrument, in the currency of the
+// account holding it: stored quotes plus the prices trades executed at.
+// Between observations an instrument is marked at its last known price, which
+// is exact on trade days and an approximation between them until a market
+// data source fills in daily closes.
+type priceHistory map[instrumentKey]series
 
-func newPriceHistory(in Input) priceHistory {
+func newPriceHistory(in Input, rates conversions) priceHistory {
 	history := priceHistory{}
-	add := func(symbol string, at time.Time, price float64) {
-		if symbol != "" && price > 0 && !at.IsZero() {
-			history[symbol] = append(history[symbol], pricePoint{at: at, price: price})
+	add := func(k instrumentKey, at time.Time, price float64) {
+		if k.symbol != "" && price > 0 && !at.IsZero() {
+			history[k] = append(history[k], pricePoint{at: at, price: price})
 		}
 	}
+	// convert turns a price in the instrument's currency into the account's.
+	convert := func(k instrumentKey, at time.Time, price float64) {
+		add(k, at, price*rates.at(k, at))
+	}
+
+	held := map[string][]instrumentKey{}
+	remember := func(k instrumentKey) {
+		for _, known := range held[k.symbol] {
+			if known == k {
+				return
+			}
+		}
+		held[k.symbol] = append(held[k.symbol], k)
+	}
+	for _, owned := range in.Lots {
+		lot := owned.Record
+		k := keyOf(owned.Account, lot.Symbol)
+		remember(k)
+		convert(k, lot.OpenTime, lot.OpenPrice)
+	}
+	for _, owned := range in.Closed {
+		p := owned.Record
+		k := keyOf(owned.Account, p.Symbol)
+		remember(k)
+		convert(k, p.OpenTime, p.OpenPrice)
+		convert(k, p.CloseTime, p.ClosePrice)
+	}
+	for _, owned := range in.CashOps {
+		op := owned.Record
+		if op.MovesStock() && op.Volume > 0 {
+			// The amount is already in the account's currency.
+			add(keyOf(owned.Account, op.Symbol), op.Time, math.Abs(op.Amount)/op.Volume)
+		}
+	}
+	// Quotes are in the instrument's currency and carry no account, so they
+	// apply to every account currency the symbol is held in.
 	for _, quote := range in.Quotes {
-		add(quote.Symbol, quote.AsOf, quote.Price)
-	}
-	for _, lot := range in.Lots {
-		add(lot.Record.Symbol, lot.Record.OpenTime, lot.Record.OpenPrice)
-	}
-	for _, position := range in.Closed {
-		p := position.Record
-		add(p.Symbol, p.OpenTime, p.OpenPrice)
-		add(p.Symbol, p.CloseTime, p.ClosePrice)
-	}
-	for _, op := range in.CashOps {
-		if op.Record.MovesStock() {
-			add(op.Record.Symbol, op.Record.Time, op.Record.Price)
+		for _, k := range held[quote.Symbol] {
+			convert(k, quote.AsOf, quote.Price)
 		}
 	}
-	for symbol := range history {
-		sortSeries(history[symbol])
+	for k := range history {
+		sortSeries(history[k])
 	}
 	return history
 }

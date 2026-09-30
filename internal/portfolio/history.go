@@ -34,15 +34,16 @@ type cashEvent struct {
 // Holdings come from lots rather than from the cash ledger: every closed row
 // and every open lot says exactly what volume was held when, including shares
 // that moved through corporate actions with no cash entry. Cash is the running
-// sum of the ledger. Prices are the last observed price per symbol, see
-// priceHistory. Conversion uses today's FX rates for every day.
-func valueHistory(in Input, conv converter, asOf time.Time) []ValuePoint {
+// sum of the ledger. Prices are the last observed price per instrument in the
+// account's currency, see priceHistory. Conversion into the base currency
+// uses today's FX rates for every day.
+func valueHistory(in Input, rates conversions, conv converter, asOf time.Time) []ValuePoint {
 	spans := holdingSpans(in)
 	events := cashEvents(in, conv)
 	if len(spans) == 0 && len(events) == 0 {
 		return nil
 	}
-	prices := newPriceHistory(in)
+	prices := newPriceHistory(in, rates)
 
 	start := firstEvent(spans, events)
 	if asOf.IsZero() || asOf.Before(start) {
@@ -119,7 +120,7 @@ func positionsValueAt(spans []holdingSpan, prices priceHistory, conv converter, 
 		if !span.heldAt(t) {
 			continue
 		}
-		price, ok := prices[span.symbol].at(t)
+		price, ok := prices[keyOf(span.account, span.symbol)].at(t)
 		if !ok {
 			continue
 		}

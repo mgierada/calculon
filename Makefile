@@ -29,12 +29,12 @@ test: ## run every test
 cover: ## run tests with a coverage summary
 	go test -cover ./...
 
-lint: ## check formatting and vet
+vet: ## check formatting and vet
 	@unformatted=$$(gofmt -l cmd internal); \
 	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 	go vet ./...
 
-fmt: ## format the code
+format: ## format the code
 	gofmt -w cmd internal
 
 import: build ## import statements: make import DIR=~/Downloads/export [USER_NAME=alice]

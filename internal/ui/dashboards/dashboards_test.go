@@ -166,3 +166,48 @@ func TestPercentCapsHugeValues(t *testing.T) {
 		t.Errorf("signedPercent(12.34) = %q", got)
 	}
 }
+
+func reportWithReturns() *portfolio.Report {
+	report := testReport()
+	for i := range 30 {
+		report.Returns.Series = append(report.Returns.Series, portfolio.ReturnPoint{
+			Time: asOf.AddDate(0, 0, i-30), TWR: 20, XIRR: 12, CAGR: 9, HasXIRR: true, HasCAGR: true,
+		})
+	}
+	report.Returns.TWR = portfolio.Delta{Amount: 20, Pct: 20, Known: true}
+	report.Returns.XIRR = portfolio.Delta{Amount: 12, Pct: 12, Known: true}
+	report.Returns.CAGR = portfolio.Delta{Amount: 9, Pct: 9, Known: true}
+	return report
+}
+
+func TestReturnChartCyclesMetricsFromTWR(t *testing.T) {
+	chart := NewReturnChart(reportWithReturns())
+	chart.SetSize(80, 16)
+
+	for _, want := range []string{"TWR over time, % since start", "XIRR over time, % a year",
+		"CAGR over time, % a year", "TWR over time"} {
+		view := chart.View()
+		if !strings.Contains(view, want) || strings.Contains(view, "no data") {
+			t.Errorf("chart does not show %q:\n%s", want, view)
+		}
+		if w, h := lipgloss.Width(view), lipgloss.Height(view); w != 80 || h != 16 {
+			t.Errorf("chart is %dx%d, want it to keep its 80x16 box", w, h)
+		}
+		chart.Update(tea.KeyPressMsg(tea.Key{Text: "m", Code: 'm'}))
+	}
+}
+
+func TestReturnStat(t *testing.T) {
+	view := render(ReturnStat(reportWithReturns()), 34, 5)
+	for _, want := range []string{"Return (TWR)", "+20.0%", "XIRR +12.0% · CAGR +9.0%"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("return card is missing %q:\n%s", want, view)
+		}
+	}
+
+	// The test report spans under MinReturnDays: TWR is known, annual rates not.
+	view = render(ReturnStat(testReport()), 34, 5)
+	if !strings.Contains(view, "annual after 90 days") {
+		t.Errorf("return card without enough history:\n%s", view)
+	}
+}
