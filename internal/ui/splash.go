@@ -31,7 +31,7 @@ const wordmark = "termfolio.ssh"
 const messageHeight = 3
 
 // DefaultSplashDuration is the least time the splash stays up.
-const DefaultSplashDuration = 3000 * time.Millisecond
+const DefaultSplashDuration = 1000 * time.Millisecond
 
 // ansiReset ends whatever colour a logo line left active.
 const ansiReset = "\x1b[0m"

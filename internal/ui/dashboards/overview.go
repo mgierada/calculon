@@ -54,6 +54,7 @@ func TotalsStats(report *portfolio.Report) []ui.Component {
 		deltaStat("Today", t.Day, base, dayUnknownNote),
 		widgets.NewStat("Realized P/L", signedMoney(t.RealizedPL, base)).
 			WithNote("dividends "+money(t.Dividends, base), widgets.Muted),
+		deltaStat("Total P/L", t.TotalPL, base, ""),
 	}
 }
 

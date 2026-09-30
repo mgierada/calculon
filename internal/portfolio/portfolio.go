@@ -81,6 +81,7 @@ type Totals struct {
 	RealizedPL     float64
 	Dividends      float64
 	Contributions  float64
+	TotalPL        Delta
 }
 
 // ValuePoint is the portfolio's worth at the end of one day, in the base
@@ -259,6 +260,9 @@ func totals(report Report, in Input, conv converter) Totals {
 	if dayKnown {
 		t.Day = Delta{Amount: dayBase, Pct: pct(dayBase, dayPrev), Known: true}
 	}
+	totalPL := unrealized + t.RealizedPL
+	t.TotalPL = Delta{Amount: totalPL, Pct: pct(totalPL, t.CostBasis), Known: true}
+
 	return t
 }
 
