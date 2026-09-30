@@ -330,3 +330,110 @@ func TestPickerChromeDoesNotWrap(t *testing.T) {
 		}
 	}
 }
+
+func sortTestTable() *Table {
+	columns := []Column{
+		{Key: "symbol", Title: "Symbol", Flex: 1, Left: true},
+		{Key: "value", Title: "Value", Flex: 1},
+		{Key: "day", Title: "Today", Flex: 1},
+	}
+	rows := []Row{
+		{"symbol": "b.PL", "value": "900.00 PLN", SortBy("value"): 900.0, "day": "—", SortBy("day"): nil},
+		{"symbol": "A.PL", "value": "1 000.00 PLN", SortBy("value"): 1000.0, "day": Toned("+1%", Positive), SortBy("day"): 1.0},
+		{"symbol": "C.PL", "value": "95.00 PLN", SortBy("value"): 95.0, "day": "-2%", SortBy("day"): -2.0},
+	}
+	table := NewTable("positions", columns, rows).Sortable()
+	table.SetSize(80, 12)
+	table.SetFocused(true)
+	return table
+}
+
+// order lists the symbols as the view shows them, top to bottom.
+func order(t *testing.T, table *Table) []string {
+	t.Helper()
+	var symbols []string
+	for _, line := range strings.Split(table.View(), "\n") {
+		for _, symbol := range []string{"A.PL", "b.PL", "C.PL"} {
+			if strings.Contains(line, symbol) {
+				symbols = append(symbols, symbol)
+			}
+		}
+	}
+	return symbols
+}
+
+func sortKey(key string) tea.KeyPressMsg {
+	return tea.KeyPressMsg(tea.Key{Text: key, Code: rune(key[0])})
+}
+
+func TestTableSortsByEveryColumn(t *testing.T) {
+	table := sortTestTable()
+	if got := strings.Join(order(t, table), ","); got != "b.PL,A.PL,C.PL" {
+		t.Fatalf("initial order = %s, want the given order", got)
+	}
+
+	// Text sorts alphabetically, ignoring case.
+	table.Update(sortKey("s"))
+	if got := strings.Join(order(t, table), ","); got != "A.PL,b.PL,C.PL" {
+		t.Errorf("by symbol = %s", got)
+	}
+	if !strings.Contains(table.View(), "Symbol ▲") {
+		t.Error("sorted column is not marked")
+	}
+
+	// Numbers sort by value, not by their formatted text, largest first.
+	table.Update(sortKey("s"))
+	if got := strings.Join(order(t, table), ","); got != "A.PL,b.PL,C.PL" {
+		t.Errorf("by value = %s, want 1000, 900, 95", got)
+	}
+	table.Update(sortKey("S"))
+	if got := strings.Join(order(t, table), ","); got != "C.PL,b.PL,A.PL" {
+		t.Errorf("by value reversed = %s", got)
+	}
+	if !strings.Contains(table.View(), "Value ▲") {
+		t.Error("reversed column is not marked ascending")
+	}
+
+	// Unknown values sort last in both directions.
+	table.Update(sortKey("s"))
+	if got := strings.Join(order(t, table), ","); got != "A.PL,C.PL,b.PL" {
+		t.Errorf("by day = %s, want the unknown b.PL last", got)
+	}
+	table.Update(sortKey("S"))
+	if got := strings.Join(order(t, table), ","); got != "C.PL,A.PL,b.PL" {
+		t.Errorf("by day reversed = %s, want the unknown b.PL still last", got)
+	}
+
+	// Past the last column the given order comes back.
+	table.Update(sortKey("s"))
+	if got := strings.Join(order(t, table), ","); got != "b.PL,A.PL,C.PL" {
+		t.Errorf("after cycling = %s, want the given order", got)
+	}
+}
+
+func TestTableSelectsTheSortedRow(t *testing.T) {
+	var selected Row
+	table := sortTestTable().OnSelect(func(row Row) tea.Cmd {
+		selected = row
+		return nil
+	})
+	table.Update(sortKey("s"))
+	table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+
+	if selected["symbol"] != "A.PL" {
+		t.Errorf("enter selected %v, want A.PL, the top row after sorting", selected["symbol"])
+	}
+}
+
+// Tables that are not sortable ignore s, so it stays free for other widgets.
+func TestUnsortableTableIgnoresSortKeys(t *testing.T) {
+	table := NewTable("holdings", testColumns, []Row{{"symbol": "b"}, {"symbol": "a"}})
+	table.SetSize(60, 10)
+	table.SetFocused(true)
+	table.Update(sortKey("s"))
+	table.SetRows([]Row{{"symbol": "b"}, {"symbol": "a"}})
+
+	if row, ok := table.highlighted(); !ok || row["symbol"] != "b" {
+		t.Errorf("top row = %v, want b: an unsortable table keeps the given order", row)
+	}
+}

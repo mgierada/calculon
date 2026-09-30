@@ -77,6 +77,11 @@ type Table struct {
 	width    int
 	height   int
 	focused  bool
+	filtered bool
+	// sortable enables s and S; sortColumn indexes columns, or is unsorted.
+	sortable   bool
+	sortColumn int
+	sortDesc   bool
 }
 
 // NewTable builds a table from neutral column and row descriptions.
@@ -103,14 +108,15 @@ func (t *Table) OnSelect(handle func(Row) tea.Cmd) *Table {
 
 // Filterable lets the user type / to filter rows by any column.
 func (t *Table) Filterable() *Table {
+	t.filtered = true
 	t.table = t.table.WithColumns(toColumns(t.columns, true)).Filtered(true)
 	return t
 }
 
-// SetRows replaces the table contents.
+// SetRows replaces the table contents, keeping the current sort.
 func (t *Table) SetRows(rows []Row) {
 	t.rows = rows
-	t.table = t.table.WithRows(toRows(rows))
+	t.applySort()
 }
 
 // Init implements ui.Component.
@@ -120,6 +126,9 @@ func (t *Table) Init() tea.Cmd {
 
 // Update implements ui.Component.
 func (t *Table) Update(msg tea.Msg) tea.Cmd {
+	if key, ok := msg.(tea.KeyPressMsg); ok && t.handleSortKey(key.String()) {
+		return nil
+	}
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == selectKey &&
 		t.onSelect != nil && !t.CapturingInput() {
 		if row, ok := t.highlighted(); ok {

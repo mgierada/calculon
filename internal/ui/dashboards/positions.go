@@ -55,10 +55,12 @@ func PositionsTable(report *portfolio.Report) *widgets.Table {
 			"weight":        percent(h.Weight * 100),
 			"days":          strconv.Itoa(daysHeld(h, report)),
 		})
+		addSortValues(rows[len(rows)-1], h, report)
 	}
-	title := fmt.Sprintf("open positions — %d holdings · enter details · / filter", len(rows))
+	title := fmt.Sprintf("open positions — %d holdings · enter details · / filter · s sort", len(rows))
 	return widgets.NewTable(title, positionColumns, rows).
 		Filterable().
+		Sortable().
 		OnSelect(func(row widgets.Row) tea.Cmd {
 			i, ok := row[holdingIndexKey].(int)
 			if !ok || i >= len(report.Holdings) {
@@ -67,6 +69,38 @@ func PositionsTable(report *portfolio.Report) *widgets.Table {
 			h := report.Holdings[i]
 			return ui.Push(h.Symbol, HoldingDetail(report, h))
 		})
+}
+
+// addSortValues gives each numeric column its raw value to sort by. Money is
+// compared in the base currency, so holdings in different accounts rank by what
+// they are worth, not by the size of the number in their own currency.
+func addSortValues(row widgets.Row, h portfolio.Holding, report *portfolio.Report) {
+	toBase := 0.0
+	if h.Value != 0 {
+		toBase = h.ValueBase / h.Value
+	}
+	values := map[string]any{
+		"volume":   h.Volume,
+		"avg_open": h.AvgOpenPrice,
+		"price":    h.Price,
+		"value":    h.ValueBase,
+		"pl":       h.PL.Amount * toBase,
+		"pl_pct":   h.PL.Pct,
+		"day":      knownOrNil(h.Day),
+		"weight":   h.Weight,
+		"days":     float64(daysHeld(h, report)),
+	}
+	for column, value := range values {
+		row[widgets.SortBy(column)] = value
+	}
+}
+
+// knownOrNil is a change's percentage, or nil so an unknown one sorts last.
+func knownOrNil(d portfolio.Delta) any {
+	if !d.Known {
+		return nil
+	}
+	return d.Pct
 }
 
 // daysHeld is whole days since the holding's first lot opened, as of the report.

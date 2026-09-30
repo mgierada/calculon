@@ -38,6 +38,8 @@ var bindingGroups = []struct {
 		{"G / end", "last page"},
 		{"enter", "open details of the row"},
 		{"/", "filter rows"},
+		{"s", "sort by next column"},
+		{"S", "reverse sort direction"},
 		{"enter (filter)", "keep filter"},
 		{"esc (filter)", "clear filter"},
 		{"shift+→ / shift+←", "scroll columns"},
