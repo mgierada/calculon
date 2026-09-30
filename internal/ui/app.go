@@ -109,7 +109,9 @@ type App struct {
 	scope *model.AccountKey
 	// summaryBase is the currency of the last all-account summary.
 	summaryBase string
-	modal       *modal
+	// splash is shown until the app is ready, nil once gone or never wanted.
+	splash *splashState
+	modal  *modal
 }
 
 // modal is a picker drawn over the screen, taking every key while open.
@@ -132,9 +134,12 @@ func Run(app *App, opts ...tea.ProgramOption) error {
 	return nil
 }
 
-// Init loads the first report.
+// Init loads the first report, starting the splash clock when there is one.
 func (a *App) Init() tea.Cmd {
-	return a.reload()
+	if a.splash == nil {
+		return a.reload()
+	}
+	return tea.Batch(a.reload(), a.splash.tick())
 }
 
 // Update handles app-level messages and keys, then forwards the rest.
@@ -148,7 +153,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.resize()
 		}
 		return a, nil
+	case splashElapsedMsg:
+		if a.splash != nil {
+			a.splash.elapsed = true
+			a.dismissSplash()
+		}
+		return a, nil
 	case reportMsg:
+		if a.splash != nil {
+			a.splash.loaded = true
+			a.dismissSplash()
+		}
 		return a, a.handleReport(msg)
 	case PushMsg:
 		return a, a.push(newScreen(msg.Title, msg.Screen))
@@ -164,6 +179,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the header, the current screen and the footer, with an open
 // modal drawn over the middle of the screen.
 func (a *App) View() tea.View {
+	if a.splash != nil {
+		view := tea.NewView(a.splash.view(a.width, a.height))
+		view.AltScreen = true
+		view.WindowTitle = "calculon"
+		return view
+	}
 	body := a.body()
 	if a.modal != nil {
 		body = overlay(body, a.modal.picker.View())
@@ -201,6 +222,13 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	if key == keyForceQuit {
 		return tea.Quit
+	}
+	if a.splash != nil {
+		// Only quitting is possible before the dashboards are up.
+		if key == keyQuit {
+			return tea.Quit
+		}
+		return nil
 	}
 	if a.modal != nil {
 		return a.updateModal(msg)
@@ -263,6 +291,13 @@ func (a *App) reload() tea.Cmd {
 	return func() tea.Msg {
 		report, err := load(scope)
 		return reportMsg{report: report, err: err}
+	}
+}
+
+// dismissSplash hides the splash once everything it waits for has happened.
+func (a *App) dismissSplash() {
+	if a.splash.done() {
+		a.splash = nil
 	}
 }
 

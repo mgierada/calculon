@@ -95,7 +95,8 @@ func runUI(args []string) error {
 	load := func(scope *model.AccountKey) (portfolio.Report, error) {
 		return portfolio.Load(env.conn, user, env.report, scope)
 	}
-	return ui.Run(ui.NewApp(dashboards.All(), load))
+	splash := ui.Splash{User: user.Name, MinDuration: ui.DefaultSplashDuration}
+	return ui.Run(ui.NewApp(dashboards.All(), load).WithSplash(splash))
 }
 
 // runServe serves the dashboards over SSH until interrupted.

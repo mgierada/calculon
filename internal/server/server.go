@@ -110,6 +110,7 @@ func handler(opts Options) bubbletea.Handler {
 		load := func(scope *model.AccountKey) (portfolio.Report, error) {
 			return portfolio.Load(opts.Conn, user, opts.Report, scope)
 		}
-		return ui.NewApp(opts.Dashboards, load), nil
+		splash := ui.Splash{User: user.Name, MinDuration: ui.DefaultSplashDuration}
+		return ui.NewApp(opts.Dashboards, load).WithSplash(splash), nil
 	}
 }

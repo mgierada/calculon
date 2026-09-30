@@ -35,3 +35,4 @@ bin/
 .ssh/
 *.db-wal
 *.db-shm
+*.grip/**
