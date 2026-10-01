@@ -19,6 +19,9 @@ type Row struct {
 	Cells  []Cell
 	Weight int
 	Height int
+	// AutoHeight makes Height a minimum: the row grows to fit the tallest
+	// cell that implements HeightFitter at the width it is given.
+	AutoHeight bool
 }
 
 // Grid is a vertical stack of rows. Rows split the available height, and the
@@ -106,10 +109,14 @@ func (g *Grid) SetFocused(bool) {}
 
 // SetSize implements Component by handing every cell the box it renders inside.
 func (g *Grid) SetSize(width, height int) {
-	heights := rowHeights(g.Rows, height)
+	widths := make([][]int, len(g.Rows))
+	for i, row := range g.Rows {
+		widths[i] = distribute(width, weights(len(row.Cells), func(j int) int { return row.Cells[j].Weight }))
+	}
+	heights := rowHeights(g.Rows, fixedHeights(g.Rows, widths), height)
 	g.boxes = make([][]box, len(g.Rows))
 	for i, row := range g.Rows {
-		widths := distribute(width, weights(len(row.Cells), func(j int) int { return row.Cells[j].Weight }))
+		widths := widths[i]
 		g.boxes[i] = make([]box, len(row.Cells))
 		for j, cell := range row.Cells {
 			g.boxes[i][j] = box{widths[j], heights[i]}
@@ -159,18 +166,37 @@ func (g *Grid) each(f func(Component)) {
 	}
 }
 
+// fixedHeights is the height each fixed row wants, zero for weighted rows. An
+// AutoHeight row wants at least its Height and as much as its tallest cell
+// needs at its width.
+func fixedHeights(rows []Row, widths [][]int) []int {
+	fixed := make([]int, len(rows))
+	for i, row := range rows {
+		fixed[i] = max(row.Height, 0)
+		if !row.AutoHeight {
+			continue
+		}
+		for j, cell := range row.Cells {
+			if fitter, ok := cell.Component.(HeightFitter); ok {
+				fixed[i] = max(fixed[i], fitter.HeightFor(widths[i][j]))
+			}
+		}
+	}
+	return fixed
+}
+
 // rowHeights gives fixed rows their height, shrinking them when they do not
 // fit, and splits the remainder among the weighted rows.
-func rowHeights(rows []Row, total int) []int {
+func rowHeights(rows []Row, fixed []int, total int) []int {
 	heights := make([]int, len(rows))
 	remaining := max(total, 0)
 	var flexible []int
-	for i, row := range rows {
-		if row.Height <= 0 {
+	for i := range rows {
+		if fixed[i] <= 0 {
 			flexible = append(flexible, i)
 			continue
 		}
-		heights[i] = min(row.Height, remaining)
+		heights[i] = min(fixed[i], remaining)
 		remaining -= heights[i]
 	}
 	shares := distribute(remaining, weights(len(flexible), func(k int) int { return rows[flexible[k]].Weight }))

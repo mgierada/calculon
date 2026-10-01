@@ -37,6 +37,14 @@ type InputCapturer interface {
 	CapturingInput() bool
 }
 
+// HeightFitter is implemented by components whose content needs more lines
+// when they are narrow, like a card whose text wraps. A grid row with
+// AutoHeight grows to the tallest height its cells ask for.
+type HeightFitter interface {
+	// HeightFor is the height the component needs to show everything at width.
+	HeightFor(width int) int
+}
+
 // PushMsg asks the app to open a drill-down screen on top of the current one.
 type PushMsg struct {
 	Title  string

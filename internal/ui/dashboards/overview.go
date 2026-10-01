@@ -31,7 +31,7 @@ var accountColumns = []widgets.Column{
 // and how the portfolio got here.
 func Overview(report *portfolio.Report) ui.Component {
 	return &ui.Grid{Rows: []ui.Row{
-		{Height: statRowHeight, Cells: ui.Cells(TotalsStats(report)...)},
+		{Height: statRowHeight, AutoHeight: true, Cells: ui.Cells(TotalsStats(report)...)},
 		{Height: stackBarHeight, Cells: ui.Cells(AllocationBar(report))},
 		{Weight: 1, Cells: []ui.Cell{
 			{Component: NewAllocationChart(report), Weight: 2},

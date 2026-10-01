@@ -1,6 +1,7 @@
 package dashboards
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -233,5 +234,34 @@ func TestPositionsStartSortedByPLDescending(t *testing.T) {
 	cmd = table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if push, ok := cmd().(ui.PushMsg); !ok || push.Title != "CDR.PL" {
 		t.Errorf("after S the top row opens %+v, want CDR.PL, the loss", cmd())
+	}
+}
+
+// Regression: at a width like a laptop terminal the KPI notes were cut off.
+func TestOverviewStatsShowEveryNoteWhenNarrow(t *testing.T) {
+	grid := Overview(testReport()).(*ui.Grid)
+	grid.SetSize(160, 50)
+
+	var cards []string
+	for _, cell := range grid.Rows[0].Cells {
+		view := regexp.MustCompile(`\x1b\[[0-9;:]*[a-zA-Z]`).ReplaceAllString(cell.Component.View(), "")
+		view = strings.NewReplacer("│", " ", "╭", " ", "╮", " ", "╰", " ", "╯", " ", "─", " ").Replace(view)
+		text := strings.Join(strings.Fields(view), " ")
+		cards = append(cards, text)
+	}
+	for card, want := range map[string]string{
+		"Total":     "net deposits 5 000.00 PLN",
+		"Positions": "cost 4 250.00 PLN",
+		"Today":     "needs a previous close",
+	} {
+		found := false
+		for _, text := range cards {
+			if strings.HasPrefix(text, card) && strings.Contains(text, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s card at 160 columns lost %q; cards: %q", card, want, cards)
+		}
 	}
 }

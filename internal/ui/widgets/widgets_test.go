@@ -2,6 +2,7 @@ package widgets
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -450,5 +451,36 @@ func TestTableStartsSortedBy(t *testing.T) {
 	table.Update(sortKey("S"))
 	if got := strings.Join(order(t, table), ","); got != "C.PL,b.PL,A.PL" {
 		t.Errorf("after S = %s, want the initial sort reversed", got)
+	}
+}
+
+// plain strips styling so wrapped words can be matched across lines.
+func plain(s string) string {
+	return strings.Join(strings.Fields(ansiPattern.ReplaceAllString(s, "")), " ")
+}
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;:]*[a-zA-Z]`)
+
+// Regression: narrow cards cut their text off instead of wrapping it.
+func TestStatWrapsInsteadOfCutting(t *testing.T) {
+	stat := NewStat("Total value", "271 378.88 PLN").WithNote("net deposits 160 524.12 PLN", Muted)
+
+	height := stat.HeightFor(18)
+	if height <= 5 {
+		t.Fatalf("HeightFor(18) = %d, want more than the 5 lines that fit unwrapped", height)
+	}
+	stat.SetSize(18, height)
+	view := stat.View()
+	for _, want := range []string{"271 378.88 PLN", "net deposits 160 524.12 PLN"} {
+		if !strings.Contains(plain(strings.ReplaceAll(view, "│", " ")), want) {
+			t.Errorf("narrow card lost %q:\n%s", want, view)
+		}
+	}
+	if w, h := lipgloss.Width(view), lipgloss.Height(view); w != 18 || h != height {
+		t.Errorf("card is %dx%d, want 18x%d", w, h, height)
+	}
+
+	if got := stat.HeightFor(60); got != 5 {
+		t.Errorf("HeightFor(60) = %d, want 5 when nothing wraps", got)
 	}
 }

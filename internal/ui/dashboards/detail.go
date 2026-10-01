@@ -24,7 +24,7 @@ var lotColumns = []widgets.Column{
 // and every past trade and cash movement in that symbol and account.
 func HoldingDetail(report *portfolio.Report, h portfolio.Holding) ui.Component {
 	return &ui.Grid{Rows: []ui.Row{
-		{Height: statRowHeight, Cells: ui.Cells(holdingStats(h)...)},
+		{Height: statRowHeight, AutoHeight: true, Cells: ui.Cells(holdingStats(h)...)},
 		{Weight: 1, Cells: ui.Cells(lotsTable(h))},
 		{Weight: 1, Cells: ui.Cells(
 			ClosedTable("closed "+h.Symbol, closedFor(report.Closed, h)),

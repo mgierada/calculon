@@ -50,13 +50,29 @@ func (s *Stat) SetFocused(focused bool) {
 	s.focused = focused
 }
 
-// View implements ui.Component.
+// View implements ui.Component. Text wraps to the card's width rather than
+// being cut off; a grid row with AutoHeight makes room for the extra lines.
 func (s *Stat) View() string {
-	lines := titleStyle.Render(s.label) + "\n" + statValueStyle.Render(s.value)
-	if s.note != "" {
-		lines += "\n" + lipgloss.NewStyle().Foreground(toneColor(s.tone)).Render(s.note)
-	}
 	innerWidth, _ := innerSize(s.width, s.height)
-	return frame(s.width, s.height, s.focused).Render(
-		lipgloss.NewStyle().MaxWidth(innerWidth).Render(lines))
+	return frame(s.width, s.height, s.focused).Render(s.content(innerWidth))
+}
+
+// HeightFor implements ui.HeightFitter: the card's height with its text
+// wrapped to width, borders included.
+func (s *Stat) HeightFor(width int) int {
+	innerWidth, _ := innerSize(width, 0)
+	return lipgloss.Height(s.content(innerWidth)) + 2
+}
+
+// content is the label, value and note, each wrapped to width.
+func (s *Stat) content(width int) string {
+	wrap := lipgloss.NewStyle().Width(max(width, 1))
+	parts := []string{
+		wrap.Inherit(titleStyle).Render(s.label),
+		wrap.Inherit(statValueStyle).Render(s.value),
+	}
+	if s.note != "" {
+		parts = append(parts, wrap.Foreground(toneColor(s.tone)).Render(s.note))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

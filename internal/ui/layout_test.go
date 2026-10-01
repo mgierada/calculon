@@ -178,3 +178,40 @@ func TestGridNestsGrids(t *testing.T) {
 		t.Errorf("Components() = %v, want the nested leaves flattened", got)
 	}
 }
+
+// fitter is a stub that asks for more height the narrower it gets.
+type fitter struct{ stub }
+
+func (f *fitter) HeightFor(width int) int { return 100 / width }
+
+func TestGridAutoHeightRowGrowsToFit(t *testing.T) {
+	card, body := &fitter{stub{name: "card"}}, &stub{name: "body"}
+	grid := &Grid{Rows: []Row{
+		{Height: 5, AutoHeight: true, Cells: Cells(card)},
+		{Cells: Cells(body)},
+	}}
+
+	grid.SetSize(10, 40)
+	if got, want := card.box(), "10x10"; got != want {
+		t.Errorf("narrow auto row = %s, want %s", got, want)
+	}
+	if got, want := body.box(), "10x30"; got != want {
+		t.Errorf("body under it = %s, want %s", got, want)
+	}
+
+	// Wide enough, the row keeps its Height as a minimum.
+	grid.SetSize(50, 40)
+	if got, want := card.box(), "50x5"; got != want {
+		t.Errorf("wide auto row = %s, want %s", got, want)
+	}
+}
+
+func TestGridIgnoresFittersWithoutAutoHeight(t *testing.T) {
+	card := &fitter{stub{name: "card"}}
+	grid := &Grid{Rows: []Row{{Height: 5, Cells: Cells(card)}, {Cells: Cells(&stub{name: "x"})}}}
+	grid.SetSize(10, 40)
+
+	if got, want := card.box(), "10x5"; got != want {
+		t.Errorf("fixed row = %s, want %s", got, want)
+	}
+}
