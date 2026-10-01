@@ -35,8 +35,16 @@ func (f *fakeFetcher) MarketPrice(_ context.Context, symbol string) (finimpulse.
 	}, nil
 }
 
+// printed is when the exchange printed every test price.
+var printed = start.Add(-5 * time.Minute)
+
+// marketPrice is a regular session price printed at printed.
 func marketPrice(symbol, currency string, price float64) finimpulse.MarketPrice {
-	return finimpulse.MarketPrice{Symbol: symbol, Currency: currency, CurrentPrice: &price}
+	printedAt := printed
+	return finimpulse.MarketPrice{
+		Symbol: symbol, Currency: currency, CurrentPrice: &price,
+		RegularMarketPrice: &price, RegularMarketTime: &printedAt,
+	}
 }
 
 // setup stores a user holding symbols and a poller over it whose clock reads
@@ -161,22 +169,34 @@ func TestPollReportsFailuresAndKeepsGoing(t *testing.T) {
 	}
 }
 
-func TestQuoteOfSkipsUnusablePrices(t *testing.T) {
-	updated := start.Add(-time.Minute)
-	withTime := marketPrice("XTB.WA", "PLN", 150)
-	withTime.CurrentPriceUpdateTime = &updated
+func TestQuoteOfUsesRegularSessionPrice(t *testing.T) {
+	if q := quoteOf("XTB.PL", marketPrice("XTB.WA", "PLN", 150)); q == nil ||
+		!q.AsOf.Equal(printed) || q.Price != 150 {
+		t.Errorf("quote = %+v, want 150 as of when it was printed", q)
+	}
 
-	if q := quoteOf("XTB.PL", start, withTime); q == nil || !q.AsOf.Equal(updated) {
-		t.Errorf("quote = %+v, want one as of the price's update time", q)
+	// Regression: before the US open current_price is the pre-market price,
+	// which measured against the regular previous close spans two sessions.
+	preMarket := marketPrice("AMZN", "USD", 249.15)
+	current := 251.81
+	preMarket.CurrentPrice = &current
+	if q := quoteOf("AMZN.US", preMarket); q == nil || q.Price != 249.15 {
+		t.Errorf("quote = %+v, want the regular close 249.15, not the pre-market price", q)
 	}
-	if q := quoteOf("XTB.PL", start, marketPrice("XTB.WA", "PLN", 150)); q == nil || !q.AsOf.Equal(start) {
-		t.Errorf("quote = %+v, want one as of the fetch without an update time", q)
+}
+
+func TestQuoteOfSkipsUnusablePrices(t *testing.T) {
+	noTime := marketPrice("XTB.WA", "PLN", 150)
+	noTime.RegularMarketTime = nil
+	cases := map[string]finimpulse.MarketPrice{
+		"no print time": noTime,
+		"pence":         marketPrice("MXFS.L", "GBp", 8525),
+		"no price":      {},
 	}
-	if q := quoteOf("MXFS.UK", start, marketPrice("MXFS.L", "GBp", 8525)); q != nil {
-		t.Errorf("quote = %+v, want none for a pence price", q)
-	}
-	if q := quoteOf("X.PL", start, finimpulse.MarketPrice{}); q != nil {
-		t.Errorf("quote = %+v, want none without a price", q)
+	for name, price := range cases {
+		if q := quoteOf("X.PL", price); q != nil {
+			t.Errorf("%s: quote = %+v, want none", name, q)
+		}
 	}
 }
 
@@ -197,7 +217,7 @@ func TestQuoteOfCarriesPreviousClose(t *testing.T) {
 	prev := 151.7
 	price.RegularMarketPreviousClose = &prev
 
-	if q := quoteOf("XTB.PL", start, price); q == nil || q.PrevClose != 151.7 {
+	if q := quoteOf("XTB.PL", price); q == nil || q.PrevClose != 151.7 {
 		t.Errorf("quote = %+v, want the reported previous close", q)
 	}
 }
@@ -206,22 +226,21 @@ func TestCloseOfFilesUnderExchangeDay(t *testing.T) {
 	price := marketPrice("XTB.WA", "PLN", 150.56)
 	regular := 150.4
 	// 22:30 UTC is already the next day in Warsaw.
-	printed := time.Date(2026, 9, 30, 22, 30, 0, 0, time.UTC)
-	price.RegularMarketPrice, price.RegularMarketTime = &regular, &printed
+	late := time.Date(2026, 9, 30, 22, 30, 0, 0, time.UTC)
+	price.RegularMarketPrice, price.RegularMarketTime = &regular, &late
 
 	c := closeOf("XTB.PL", start, price)
 	if c == nil || c.Session.Format(time.DateOnly) != "2026-10-01" || c.Close != 150.4 {
 		t.Errorf("close = %+v, want 150.4 on 2026-10-01", c)
 	}
-	if closeOf("XTB.PL", start, marketPrice("XTB.WA", "PLN", 150)) != nil {
+	current := 150.0
+	if closeOf("XTB.PL", start, finimpulse.MarketPrice{CurrentPrice: &current}) != nil {
 		t.Error("close made from a response without a regular market price")
 	}
 }
 
 func TestPollStoresSessionClose(t *testing.T) {
 	price := marketPrice("XTB.WA", "PLN", 150.56)
-	regular, printed := 150.56, start.Add(-time.Minute)
-	price.RegularMarketPrice, price.RegularMarketTime = &regular, &printed
 	poller, _ := setup(t, &fakeFetcher{prices: map[string]finimpulse.MarketPrice{"XTB.WA": price}}, "XTB.PL")
 
 	poller.poll(context.Background())

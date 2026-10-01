@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/mgierada/calculon/internal/markethours"
 	"github.com/mgierada/calculon/internal/model"
 )
 
@@ -30,6 +31,9 @@ type Options struct {
 	FX FX
 	// Prices overrides the stored quotes as the source of latest prices.
 	Prices PriceSource
+	// Now is when the report is viewed, which decides whether a day change
+	// is today's or left over from an earlier session. Zero skips the check.
+	Now time.Time
 }
 
 // Delta is a change that may not be computable yet, e.g. day-to-date change
@@ -58,7 +62,13 @@ type Holding struct {
 	Value      float64
 	PL         Delta
 	Day        Delta
-	ValueBase  float64
+	// DayAsOf is the exchange-local trading day Day is the move of; zero when
+	// the exchange is unknown.
+	DayAsOf time.Time
+	// DayStale marks a Day from a session before the latest one, e.g. when the
+	// data source lags. It is left out of the totals' Day.
+	DayStale  bool
+	ValueBase float64
 	// Weight is the holding's share of the whole portfolio, cash included.
 	Weight    float64
 	FirstOpen time.Time
@@ -86,10 +96,13 @@ type Totals struct {
 	CostBasis      float64
 	Unrealized     Delta
 	Day            Delta
-	RealizedPL     float64
-	Dividends      float64
-	Contributions  float64
-	TotalPL        Delta
+	// DayStale counts holdings left out of Day because their price is from an
+	// earlier session.
+	DayStale      int
+	RealizedPL    float64
+	Dividends     float64
+	Contributions float64
+	TotalPL       Delta
 }
 
 // ValuePoint is the portfolio's worth at the end of one day, in the base
@@ -139,6 +152,7 @@ func Build(in Input, opts Options) Report {
 	}
 	rates := newConversions(in)
 	report.Holdings = buildHoldings(in.Lots, opts.Prices, rates, conv)
+	markStaleDays(report.Holdings, opts.Now)
 	report.Accounts = summarizeAccounts(in.Accounts, report.Holdings, in.CashOps, conv)
 	report.Totals = totals(report, in, conv)
 	assignWeights(report.Holdings, report.Totals.Total)
@@ -211,6 +225,9 @@ func valueHolding(h *Holding, prices PriceSource, conv converter) {
 		if quote.HasPrevClose() {
 			change := (quote.Price - quote.PrevClose) * h.Volume
 			h.Day = Delta{Amount: change * h.Conversion, Pct: pct(change, quote.PrevClose*h.Volume), Known: true}
+			if s, ok := markethours.For(h.Symbol); ok {
+				h.DayAsOf = s.Day(quote.AsOf)
+			}
 		}
 	}
 	h.Value = h.Volume * h.Price * h.Conversion
@@ -246,6 +263,20 @@ func summarizeAccounts(accounts []model.AccountSnapshot, holdings []Holding,
 	return summaries
 }
 
+// markStaleDays flags day changes from a session before the latest one their
+// exchange has held by now.
+func markStaleDays(holdings []Holding, now time.Time) {
+	if now.IsZero() {
+		return
+	}
+	for i := range holdings {
+		h := &holdings[i]
+		if s, ok := markethours.For(h.Symbol); ok && h.Day.Known && !h.DayAsOf.IsZero() {
+			h.DayStale = h.DayAsOf.Before(s.LatestDay(now))
+		}
+	}
+}
+
 // totals rolls accounts, holdings and history up into base-currency figures.
 func totals(report Report, in Input, conv converter) Totals {
 	var t Totals
@@ -253,7 +284,10 @@ func totals(report Report, in Input, conv converter) Totals {
 	for _, h := range report.Holdings {
 		t.PositionsValue += h.ValueBase
 		t.CostBasis += conv.toBase(h.CostBasis, h.Account.Currency)
-		if h.Day.Known {
+		if h.DayStale {
+			t.DayStale++
+		}
+		if h.Day.Known && !h.DayStale {
 			change := conv.toBase(h.Day.Amount, h.Account.Currency)
 			dayBase += change
 			dayPrev += h.ValueBase - change

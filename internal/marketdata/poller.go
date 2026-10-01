@@ -11,6 +11,7 @@ import (
 
 	"github.com/mgierada/calculon/internal/db"
 	"github.com/mgierada/calculon/internal/finimpulse"
+	"github.com/mgierada/calculon/internal/markethours"
 	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/symbolmap"
 )
@@ -149,21 +150,24 @@ func (p *Poller) fetch(ctx context.Context, target db.PriceTarget, fetchedAt tim
 		return err
 	}
 	price := db.IntradayPrice{Symbol: target.Symbol, FetchedAt: fetchedAt, Response: resp}
-	return db.StoreIntradayPrice(p.conn, price, quoteOf(target.Symbol, fetchedAt, resp.Result),
+	return db.StoreIntradayPrice(p.conn, price, quoteOf(target.Symbol, resp.Result),
 		closeOf(target.Symbol, fetchedAt, resp.Result))
 }
 
 // quoteOf is the price dashboards value a holding at, with the previous close
 // day change is measured from, or nil when the response has no usable price.
-func quoteOf(symbol string, fetchedAt time.Time, price finimpulse.MarketPrice) *model.Quote {
-	if price.CurrentPrice == nil || *price.CurrentPrice <= 0 || subUnitCurrencies[price.Currency] {
+// It is the regular session's price at the time the exchange printed it:
+// current_price follows pre- and post-market trading, and measured against
+// the regular previous close it would mix two sessions' moves.
+func quoteOf(symbol string, price finimpulse.MarketPrice) *model.Quote {
+	if price.RegularMarketPrice == nil || *price.RegularMarketPrice <= 0 ||
+		price.RegularMarketTime == nil || subUnitCurrencies[price.Currency] {
 		return nil
 	}
-	asOf := fetchedAt
-	if price.CurrentPriceUpdateTime != nil {
-		asOf = *price.CurrentPriceUpdateTime
+	quote := &model.Quote{
+		Symbol: symbol, AsOf: *price.RegularMarketTime, Price: *price.RegularMarketPrice,
+		Source: quoteSource,
 	}
-	quote := &model.Quote{Symbol: symbol, AsOf: asOf, Price: *price.CurrentPrice, Source: quoteSource}
 	if prev := price.RegularMarketPreviousClose; prev != nil && *prev > 0 {
 		quote.PrevClose = *prev
 	}
@@ -180,8 +184,8 @@ func closeOf(symbol string, fetchedAt time.Time, price finimpulse.MarketPrice) *
 	}
 	asOf := *price.RegularMarketTime
 	session := asOf.UTC()
-	if s, ok := sessionOf(symbol); ok {
-		session = asOf.In(s.loc)
+	if s, ok := markethours.For(symbol); ok {
+		session = s.Day(asOf)
 	}
 	return &db.DailyClose{
 		Symbol: symbol, Session: session, Close: *price.RegularMarketPrice,

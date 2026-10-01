@@ -52,7 +52,7 @@ func PositionsTable(report *portfolio.Report) *widgets.Table {
 			"value":      money(h.Value, ccy),
 			"pl":         deltaCell(h.PL, ""),
 			"pl_pct":     deltaPctCell(h.PL),
-			"day":        deltaPctCell(h.Day),
+			"day":        dayCell(h),
 			"weight":     percent(h.Weight * 100),
 			"days":       strconv.Itoa(daysHeld(h, report)),
 		})
@@ -114,7 +114,7 @@ func addSortValues(row widgets.Row, h portfolio.Holding, report *portfolio.Repor
 		"value":    h.ValueBase,
 		"pl":       h.PL.Amount * toBase,
 		"pl_pct":   h.PL.Pct,
-		"day":      knownOrNil(h.Day),
+		"day":      dayOrNil(h),
 		"weight":   h.Weight,
 		"days":     float64(daysHeld(h, report)),
 	}
@@ -129,6 +129,15 @@ func knownOrNil(d portfolio.Delta) any {
 		return nil
 	}
 	return d.Pct
+}
+
+// dayOrNil is a holding's day change percentage, or nil so one from an
+// earlier session sorts last with the unknown ones instead of among today's.
+func dayOrNil(h portfolio.Holding) any {
+	if h.DayStale {
+		return nil
+	}
+	return knownOrNil(h.Day)
 }
 
 // daysHeld is whole days since the holding's first lot opened, as of the report.

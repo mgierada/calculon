@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -199,5 +200,47 @@ func TestDailyCloseKeepsLatestPricePerSession(t *testing.T) {
 	}
 	if want := "[2026-09-29=340 2026-09-30=352]"; fmt.Sprint(got) != want {
 		t.Errorf("closes = %v, want %s", got, want)
+	}
+}
+
+// Regression: quotes stored before version 5 took the pre-market price, timed
+// after the regular close, so it stayed the latest quote.
+func TestMigrateRebuildsFinimpulseQuotesFromRegularSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v4.db")
+	conn, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	user := createTestUser(t, conn, "alice")
+	statement := testStatement()
+	statement.OpenLots = []model.OpenLot{testLot("l1", "AMZN.US", 249.61)}
+	mustImport(t, conn, user.ID, statement)
+
+	price := testIntradayPrice("AMZN.US", testFetchedAt, 251.81)
+	regular, prev, printed := 249.15, 246.67, time.Date(2026, 9, 30, 20, 0, 1, 0, time.UTC)
+	price.Result.RegularMarketPrice, price.Result.RegularMarketPreviousClose = &regular, &prev
+	price.Result.RegularMarketTime = &printed
+	preMarket := model.Quote{Symbol: "AMZN.US", AsOf: testFetchedAt, Price: 251.81, Source: "finimpulse"}
+	mustStoreIntradayPrice(t, conn, price, &preMarket, nil)
+	if _, err := conn.Exec(`PRAGMA user_version = 4`); err != nil {
+		t.Fatalf("downgrading: %v", err)
+	}
+	conn.Close()
+
+	conn, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open on a v4 database returned error: %v", err)
+	}
+	defer conn.Close()
+	quotes, err := Quotes(conn, user.ID)
+	if err != nil {
+		t.Fatalf("Quotes returned error: %v", err)
+	}
+	last := quotes[len(quotes)-1]
+	if last.Source != "finimpulse" || last.Price != 249.15 || !last.AsOf.Equal(printed) || last.PrevClose != 246.67 {
+		t.Errorf("latest quote = %+v, want the regular close 249.15 at %v", last, printed)
+	}
+	if len(quotes) != 2 {
+		t.Errorf("quotes = %+v, want the statement's and one rebuilt", quotes)
 	}
 }

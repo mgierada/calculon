@@ -1,6 +1,7 @@
 package dashboards
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -108,6 +109,45 @@ func deltaPctCell(d portfolio.Delta) any {
 		return widgets.Toned(unknown, widgets.Muted)
 	}
 	return widgets.Toned(signedPercent(d.Pct), widgets.ToneOf(d.Amount))
+}
+
+// staleDay labels a day change from an earlier session with that session's
+// date, e.g. "29 Sep".
+func staleDay(day time.Time) string {
+	return day.Format("2 Jan")
+}
+
+// dayCell renders a holding's day change, muted and dated when it is the move
+// of an earlier session rather than today's.
+func dayCell(h portfolio.Holding) any {
+	if !h.DayStale {
+		return deltaPctCell(h.Day)
+	}
+	return widgets.Toned(signedPercent(h.Day.Pct)+" "+staleDay(h.DayAsOf), widgets.Muted)
+}
+
+// dayStat is a holding's day change card, noting the session it is from when
+// that is not the latest.
+func dayStat(h portfolio.Holding) *widgets.Stat {
+	if !h.Day.Known || !h.DayStale {
+		return deltaStat("Today", h.Day, h.Account.Currency, dayUnknownNote)
+	}
+	return widgets.NewStat("Today", signedMoney(h.Day.Amount, h.Account.Currency)).
+		WithNote(signedPercent(h.Day.Pct)+" · as of "+staleDay(h.DayAsOf), widgets.Muted)
+}
+
+// totalDayStat is the portfolio's day change card, saying how many holdings
+// it leaves out for having only an earlier session's price.
+func totalDayStat(t portfolio.Totals, base string) *widgets.Stat {
+	if t.DayStale == 0 {
+		return deltaStat("Today", t.Day, base, dayUnknownNote)
+	}
+	excluded := fmt.Sprintf("%d stale excluded", t.DayStale)
+	if !t.Day.Known {
+		return widgets.NewStat("Today", unknown).WithNote(excluded, widgets.Muted)
+	}
+	return widgets.NewStat("Today", signedMoney(t.Day.Amount, base)).
+		WithNote(signedPercent(t.Day.Pct)+" · "+excluded, widgets.ToneOf(t.Day.Amount))
 }
 
 // deltaStat is a KPI card for a change that may be unknown.

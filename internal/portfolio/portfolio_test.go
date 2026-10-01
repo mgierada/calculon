@@ -178,6 +178,29 @@ func TestDayChangeFallsBackWhenLatestQuoteReportsNoClose(t *testing.T) {
 	}
 }
 
+// A data source lagging a session behind must not pass its move off as today's.
+func TestDayChangeFromEarlierSessionIsStale(t *testing.T) {
+	in := testInput()
+	in.Quotes = append(in.Quotes,
+		model.Quote{Symbol: "SNT.PL", AsOf: asOf.Add(time.Hour), Price: 130, PrevClose: 125})
+
+	fresh := Build(in, Options{FX: fx, Now: asOf.Add(2 * time.Hour)})
+	if snt := fresh.Holdings[1]; snt.DayStale || !fresh.Totals.Day.Known {
+		t.Errorf("same-day move = stale %v, total %+v; want today's", snt.DayStale, fresh.Totals.Day)
+	}
+
+	// Two sessions later the Monday move is history.
+	lagging := Build(in, Options{FX: fx, Now: asOf.AddDate(0, 0, 2).Add(3 * time.Hour)})
+	snt := lagging.Holdings[1]
+	if !snt.DayStale || snt.DayAsOf.Format(time.DateOnly) != "2026-09-28" {
+		t.Errorf("SNT = stale %v as of %v, want stale as of 2026-09-28", snt.DayStale, snt.DayAsOf)
+	}
+	if lagging.Totals.Day.Known || lagging.Totals.DayStale != 1 {
+		t.Errorf("total day = %+v with %d stale, want the stale move left out",
+			lagging.Totals.Day, lagging.Totals.DayStale)
+	}
+}
+
 // fixedPrices is a PriceSource stub standing in for a market data API.
 type fixedPrices map[string]Quote
 

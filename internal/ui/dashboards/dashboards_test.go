@@ -307,3 +307,34 @@ func TestHoldingDetailClosesOnceHoldingIsGone(t *testing.T) {
 		t.Error("detail rebuilt for a holding no longer held")
 	}
 }
+
+// staleReport is testReport with SNT.PL priced only from an earlier session.
+func staleReport() *portfolio.Report {
+	report := testReport()
+	for i := range report.Holdings {
+		if h := &report.Holdings[i]; h.Symbol == "SNT.PL" {
+			h.Day = portfolio.Delta{Amount: 20, Pct: 0.58, Known: true}
+			h.DayStale, h.DayAsOf = true, time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+		}
+	}
+	report.Totals.Day, report.Totals.DayStale = portfolio.Delta{}, 1
+	return report
+}
+
+func TestStaleDayChangeIsLabelledWithItsSession(t *testing.T) {
+	report := staleReport()
+
+	if view := render(PositionsTable(report), 200, 20); !strings.Contains(view, "+0.6% 29 Sep") {
+		t.Errorf("positions do not date the stale move:\n%s", view)
+	}
+	for _, h := range report.Holdings {
+		if h.Symbol == "SNT.PL" {
+			if view := render(dayStat(h), 30, 5); !strings.Contains(view, "as of 29 Sep") {
+				t.Errorf("detail card does not date the stale move:\n%s", view)
+			}
+		}
+	}
+	if view := render(totalDayStat(report.Totals, report.Base), 30, 5); !strings.Contains(view, "1 stale excluded") {
+		t.Errorf("total card does not say what it leaves out:\n%s", view)
+	}
+}

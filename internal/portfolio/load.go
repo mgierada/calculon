@@ -3,6 +3,7 @@ package portfolio
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/mgierada/calculon/internal/db"
 	"github.com/mgierada/calculon/internal/model"
@@ -11,6 +12,9 @@ import (
 // Load reads everything stored for a user and builds their report: the summary
 // of all accounts when scope is nil, otherwise just that account.
 func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Report, error) {
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
 	in := Input{User: user.Name}
 	var err error
 	if in.Accounts, err = db.Accounts(conn, user.ID); err != nil {

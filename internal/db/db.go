@@ -19,12 +19,42 @@ var schemaFS embed.FS
 // schemaVersion is stored in SQLite's user_version. Bump it whenever
 // schema.sql changes in a way CREATE IF NOT EXISTS cannot apply, and add the
 // statement that upgrades the previous version to migrations.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // migrations upgrade a database from the version they are keyed by to the next.
-var migrations = map[int]string{
-	2: `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''`,
-	3: `ALTER TABLE quotes ADD COLUMN prev_close REAL`,
+var migrations = map[int]func(*sql.DB) error{
+	2: execSQL(`ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''`),
+	3: execSQL(`ALTER TABLE quotes ADD COLUMN prev_close REAL`),
+	4: rebuildFinimpulseQuotes,
+}
+
+// rebuildFinimpulseQuotes replaces finimpulse quotes, which used to take
+// current_price and so followed pre- and post-market trading, with the stored
+// responses' regular session prices, newest fetch first. The empty hash
+// differs from any real one, so the next poll rewrites the row with its hash.
+// A database that never polled has no responses and no such quotes.
+func rebuildFinimpulseQuotes(conn *sql.DB) error {
+	var polled int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'intraday_price'`).Scan(&polled); err != nil || polled == 0 {
+		return err
+	}
+	return execSQL(`DELETE FROM quotes WHERE source = 'finimpulse';
+INSERT OR IGNORE INTO quotes (symbol, as_of, price, source, content_hash, prev_close)
+SELECT symbol, regular_market_time, regular_market_price, 'finimpulse', '',
+       regular_market_previous_close
+FROM intraday_price
+WHERE regular_market_price > 0 AND regular_market_time IS NOT NULL
+  AND currency NOT IN ('GBp', 'GBX', 'ZAc', 'ILA')
+ORDER BY fetched_at DESC`)(conn)
+}
+
+// execSQL is a migration that runs fixed statements.
+func execSQL(statements string) func(*sql.DB) error {
+	return func(conn *sql.DB) error {
+		_, err := conn.Exec(statements)
+		return err
+	}
 }
 
 // timeLayout is how timestamps are stored, chosen so text ordering matches
@@ -118,7 +148,7 @@ func Migrate(conn *sql.DB) error {
 	}
 	if version > 0 {
 		for v := version; v < schemaVersion; v++ {
-			if _, err := conn.Exec(migrations[v]); err != nil {
+			if err := migrations[v](conn); err != nil {
 				return fmt.Errorf("failed to migrate schema from version %d: %w", v, err)
 			}
 		}

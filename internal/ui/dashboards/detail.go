@@ -45,7 +45,7 @@ func holdingStats(h portfolio.Holding) []ui.Component {
 		widgets.NewStat("Price", price(h.Price)).
 			WithNote("avg open "+price(h.AvgOpenPrice), widgets.Muted),
 		deltaStat("P/L", h.PL, ccy, ""),
-		deltaStat("Today", h.Day, ccy, dayUnknownNote),
+		dayStat(h),
 	}
 }
 
