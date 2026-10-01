@@ -111,8 +111,8 @@ func runServe() error {
 	defer stop()
 
 	return server.Run(ctx, server.Options{
-		Addr:        env.cfg.SSHAddr,
-		HostKeyPath: env.cfg.SSHHostKey,
+		Addr:        env.cfg.CalculonConfig.SSHAddr,
+		HostKeyPath: env.cfg.CalculonConfig.SSHHostKey,
 		Conn:        env.conn,
 		Dashboards:  dashboards.All(),
 		Report:      env.report,
@@ -340,18 +340,18 @@ func openEnv() (env, error) {
 	if err != nil {
 		return env{}, err
 	}
-	rates, err := portfolio.ParseRates(cfg.FXRates)
+	rates, err := portfolio.ParseRates(cfg.CalculonConfig.FXRates)
 	if err != nil {
 		return env{}, fmt.Errorf("FX_RATES: %w", err)
 	}
-	conn, err := db.Open(cfg.DBPath)
+	conn, err := db.Open(cfg.DBConfig.DBPath)
 	if err != nil {
 		return env{}, err
 	}
 	return env{
 		cfg:    cfg,
 		conn:   conn,
-		report: portfolio.Options{FX: portfolio.NewStaticFX(cfg.BaseCurrency, rates)},
+		report: portfolio.Options{FX: portfolio.NewStaticFX(cfg.CalculonConfig.BaseCurrency, rates)},
 	}, nil
 }
 
@@ -359,7 +359,7 @@ func openEnv() (env, error) {
 // then the only user when there is exactly one.
 func resolveUser(e env, name string) (db.User, error) {
 	if name == "" {
-		name = e.cfg.User
+		name = e.cfg.CalculonConfig.User
 	}
 	if name != "" {
 		return db.UserByName(e.conn, name)
