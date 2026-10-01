@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,10 +27,11 @@ func testIntradayPrice(symbol string, fetchedAt time.Time, price float64) Intrad
 	}
 }
 
-func mustStoreIntradayPrice(t *testing.T, conn *Conn, price IntradayPrice, quote *model.Quote) {
+func mustStoreIntradayPrice(t *testing.T, conn *Conn, price IntradayPrice, quote *model.Quote,
+	daily *DailyClose) {
 	t.Helper()
 
-	if err := StoreIntradayPrice(conn, price, quote); err != nil {
+	if err := StoreIntradayPrice(conn, price, quote, daily); err != nil {
 		t.Fatalf("StoreIntradayPrice returned error: %v", err)
 	}
 }
@@ -38,8 +40,8 @@ func TestStoreIntradayPriceKeepsEveryResponseAndQuote(t *testing.T) {
 	conn := openTestDB(t)
 	price := testIntradayPrice("SNT.PL", testFetchedAt, 350)
 	quote := model.Quote{Symbol: "SNT.PL", AsOf: testFetchedAt, Price: 350, Source: "finimpulse"}
-	mustStoreIntradayPrice(t, conn, price, &quote)
-	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt.Add(15*time.Minute), 351), nil)
+	mustStoreIntradayPrice(t, conn, price, &quote, nil)
+	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt.Add(15*time.Minute), 351), nil, nil)
 
 	var (
 		count                int
@@ -106,8 +108,8 @@ func TestPriceTargetsListsMappedHeldSymbolsWithLastFetch(t *testing.T) {
 	if err := StoreSymbolMappings(conn, "finimpulse", mappings); err != nil {
 		t.Fatalf("StoreSymbolMappings returned error: %v", err)
 	}
-	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt, 350), nil)
-	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt.Add(time.Hour), 351), nil)
+	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt, 350), nil, nil)
+	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt.Add(time.Hour), 351), nil, nil)
 
 	targets, err := PriceTargets(conn, "finimpulse")
 	if err != nil {
@@ -147,5 +149,55 @@ func TestStoreSymbolMappingsKeepsStoredMapping(t *testing.T) {
 	}
 	if stored != "MXF.L" {
 		t.Errorf("provider_symbol = %q, want the hand fix kept", stored)
+	}
+}
+
+func TestQuotesRoundTripPrevClose(t *testing.T) {
+	conn := openTestDB(t)
+	user := createTestUser(t, conn, "alice")
+	mustImport(t, conn, user.ID, testStatement())
+	quote := model.Quote{Symbol: "SNT.PL", AsOf: testFetchedAt, Price: 350, Source: "finimpulse", PrevClose: 345}
+	mustStoreIntradayPrice(t, conn, testIntradayPrice("SNT.PL", testFetchedAt, 350), &quote, nil)
+
+	quotes, err := Quotes(conn, user.ID)
+	if err != nil {
+		t.Fatalf("Quotes returned error: %v", err)
+	}
+	if len(quotes) != 2 || quotes[0].PrevClose != 0 || quotes[1].PrevClose != 345 {
+		t.Errorf("quotes = %+v, want the statement's without a close, the API's with one", quotes)
+	}
+}
+
+func TestDailyCloseKeepsLatestPricePerSession(t *testing.T) {
+	conn := openTestDB(t)
+	day := func(d int, at time.Time, price float64) *DailyClose {
+		return &DailyClose{
+			Symbol: "SNT.PL", Session: time.Date(2026, 9, d, 0, 0, 0, 0, time.UTC),
+			Close: price, Currency: "PLN", AsOf: at, FetchedAt: at,
+		}
+	}
+	price := testIntradayPrice("SNT.PL", testFetchedAt, 350)
+	mustStoreIntradayPrice(t, conn, price, nil, day(30, testFetchedAt, 350))
+	mustStoreIntradayPrice(t, conn, price, nil, day(30, testFetchedAt.Add(time.Hour), 352))
+	mustStoreIntradayPrice(t, conn, price, nil, day(29, testFetchedAt, 340))
+
+	rows, err := conn.Query(`SELECT session_date, close FROM eod_price ORDER BY session_date`)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var (
+			date  string
+			close float64
+		)
+		if err := rows.Scan(&date, &close); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, fmt.Sprintf("%s=%v", date, close))
+	}
+	if want := "[2026-09-29=340 2026-09-30=352]"; fmt.Sprint(got) != want {
+		t.Errorf("closes = %v, want %s", got, want)
 	}
 }

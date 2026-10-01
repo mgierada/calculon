@@ -47,7 +47,7 @@ ORDER BY c.op_time DESC, c.external_id`
 // quotesSQL reads the quotes of every symbol the user holds or has traded.
 // Quotes are shared market data, not owned, so scoping is by symbol.
 const quotesSQL = `
-SELECT symbol, as_of, price, source FROM quotes
+SELECT symbol, as_of, price, source, prev_close FROM quotes
 WHERE symbol IN (
     SELECT l.symbol FROM open_lots l
     JOIN accounts a ON a.provider = l.provider AND a.account_id = l.account_id
@@ -153,12 +153,14 @@ func CashOps(conn *sql.DB, userID int64) ([]model.Owned[model.CashOp], error) {
 func Quotes(conn *sql.DB, userID int64) ([]model.Quote, error) {
 	return query(conn, quotesSQL, userID, "quotes", func(rows *sql.Rows) (model.Quote, error) {
 		var (
-			quote model.Quote
-			asOf  string
+			quote     model.Quote
+			asOf      string
+			prevClose sql.NullFloat64
 		)
-		if err := rows.Scan(&quote.Symbol, &asOf, &quote.Price, &quote.Source); err != nil {
+		if err := rows.Scan(&quote.Symbol, &asOf, &quote.Price, &quote.Source, &prevClose); err != nil {
 			return quote, err
 		}
+		quote.PrevClose = prevClose.Float64
 		var err error
 		quote.AsOf, err = parseRequiredTime(asOf)
 		return quote, err

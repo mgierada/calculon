@@ -19,11 +19,12 @@ var schemaFS embed.FS
 // schemaVersion is stored in SQLite's user_version. Bump it whenever
 // schema.sql changes in a way CREATE IF NOT EXISTS cannot apply, and add the
 // statement that upgrades the previous version to migrations.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // migrations upgrade a database from the version they are keyed by to the next.
 var migrations = map[int]string{
 	2: `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''`,
+	3: `ALTER TABLE quotes ADD COLUMN prev_close REAL`,
 }
 
 // timeLayout is how timestamps are stored, chosen so text ordering matches

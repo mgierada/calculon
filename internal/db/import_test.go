@@ -342,6 +342,8 @@ func TestMigrateUpgradesVersion2(t *testing.T) {
 		`CREATE TABLE accounts (provider TEXT NOT NULL, account_id TEXT NOT NULL,
 			user_id INTEGER NOT NULL, currency TEXT NOT NULL, snapshot_as_of TEXT,
 			PRIMARY KEY (provider, account_id))`,
+		`CREATE TABLE quotes (symbol TEXT NOT NULL, as_of TEXT NOT NULL, price REAL NOT NULL,
+			source TEXT NOT NULL, content_hash TEXT NOT NULL, PRIMARY KEY (symbol, as_of))`,
 		`INSERT INTO users VALUES (1, 'alice', '2026-01-01T00:00:00Z')`,
 		`INSERT INTO accounts VALUES ('xtb', '50747414', 1, 'PLN', NULL)`,
 		`PRAGMA user_version = 2`,

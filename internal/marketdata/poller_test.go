@@ -191,3 +191,48 @@ func TestSubscribeCancelClosesChannel(t *testing.T) {
 	}
 	poller.broadcast(Update{})
 }
+
+func TestQuoteOfCarriesPreviousClose(t *testing.T) {
+	price := marketPrice("XTB.WA", "PLN", 150.56)
+	prev := 151.7
+	price.RegularMarketPreviousClose = &prev
+
+	if q := quoteOf("XTB.PL", start, price); q == nil || q.PrevClose != 151.7 {
+		t.Errorf("quote = %+v, want the reported previous close", q)
+	}
+}
+
+func TestCloseOfFilesUnderExchangeDay(t *testing.T) {
+	price := marketPrice("XTB.WA", "PLN", 150.56)
+	regular := 150.4
+	// 22:30 UTC is already the next day in Warsaw.
+	printed := time.Date(2026, 9, 30, 22, 30, 0, 0, time.UTC)
+	price.RegularMarketPrice, price.RegularMarketTime = &regular, &printed
+
+	c := closeOf("XTB.PL", start, price)
+	if c == nil || c.Session.Format(time.DateOnly) != "2026-10-01" || c.Close != 150.4 {
+		t.Errorf("close = %+v, want 150.4 on 2026-10-01", c)
+	}
+	if closeOf("XTB.PL", start, marketPrice("XTB.WA", "PLN", 150)) != nil {
+		t.Error("close made from a response without a regular market price")
+	}
+}
+
+func TestPollStoresSessionClose(t *testing.T) {
+	price := marketPrice("XTB.WA", "PLN", 150.56)
+	regular, printed := 150.56, start.Add(-time.Minute)
+	price.RegularMarketPrice, price.RegularMarketTime = &regular, &printed
+	poller, _ := setup(t, &fakeFetcher{prices: map[string]finimpulse.MarketPrice{"XTB.WA": price}}, "XTB.PL")
+
+	poller.poll(context.Background())
+
+	var date string
+	var close float64
+	if err := poller.conn.QueryRow(`SELECT session_date, close FROM eod_price WHERE symbol = 'XTB.PL'`).
+		Scan(&date, &close); err != nil {
+		t.Fatalf("no close stored: %v", err)
+	}
+	if date != "2026-09-30" || close != 150.56 {
+		t.Errorf("close = %s %v, want 2026-09-30 150.56", date, close)
+	}
+}

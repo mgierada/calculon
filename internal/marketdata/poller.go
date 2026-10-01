@@ -149,11 +149,12 @@ func (p *Poller) fetch(ctx context.Context, target db.PriceTarget, fetchedAt tim
 		return err
 	}
 	price := db.IntradayPrice{Symbol: target.Symbol, FetchedAt: fetchedAt, Response: resp}
-	return db.StoreIntradayPrice(p.conn, price, quoteOf(target.Symbol, fetchedAt, resp.Result))
+	return db.StoreIntradayPrice(p.conn, price, quoteOf(target.Symbol, fetchedAt, resp.Result),
+		closeOf(target.Symbol, fetchedAt, resp.Result))
 }
 
-// quoteOf is the price dashboards value a holding at, or nil when the response
-// has none usable.
+// quoteOf is the price dashboards value a holding at, with the previous close
+// day change is measured from, or nil when the response has no usable price.
 func quoteOf(symbol string, fetchedAt time.Time, price finimpulse.MarketPrice) *model.Quote {
 	if price.CurrentPrice == nil || *price.CurrentPrice <= 0 || subUnitCurrencies[price.Currency] {
 		return nil
@@ -162,7 +163,30 @@ func quoteOf(symbol string, fetchedAt time.Time, price finimpulse.MarketPrice) *
 	if price.CurrentPriceUpdateTime != nil {
 		asOf = *price.CurrentPriceUpdateTime
 	}
-	return &model.Quote{Symbol: symbol, AsOf: asOf, Price: *price.CurrentPrice, Source: quoteSource}
+	quote := &model.Quote{Symbol: symbol, AsOf: asOf, Price: *price.CurrentPrice, Source: quoteSource}
+	if prev := price.RegularMarketPreviousClose; prev != nil && *prev > 0 {
+		quote.PrevClose = *prev
+	}
+	return quote
+}
+
+// closeOf is the regular session's latest price, filed under the session's
+// exchange-local day, or nil when the response has none. Prices are kept in
+// the unit the API sends, pence included, with their currency.
+func closeOf(symbol string, fetchedAt time.Time, price finimpulse.MarketPrice) *db.DailyClose {
+	if price.RegularMarketPrice == nil || *price.RegularMarketPrice <= 0 ||
+		price.RegularMarketTime == nil {
+		return nil
+	}
+	asOf := *price.RegularMarketTime
+	session := asOf.UTC()
+	if s, ok := sessionOf(symbol); ok {
+		session = asOf.In(s.loc)
+	}
+	return &db.DailyClose{
+		Symbol: symbol, Session: session, Close: *price.RegularMarketPrice,
+		Currency: price.Currency, AsOf: asOf, FetchedAt: fetchedAt,
+	}
 }
 
 // broadcast hands update to every subscriber, replacing one they have not

@@ -13,8 +13,9 @@ import (
 type Quote struct {
 	Price float64
 	AsOf  time.Time
-	// PrevClose is the last price observed on an earlier calendar day. It is
-	// zero until such a quote exists, which leaves day-to-date change unknown.
+	// PrevClose is the previous session's close the latest quote's source
+	// reported, or else the last price observed on an earlier calendar day. It
+	// is zero when neither exists, which leaves day-to-date change unknown.
 	PrevClose float64
 }
 
@@ -34,6 +35,9 @@ type PriceSource interface {
 type pricePoint struct {
 	at    time.Time
 	price float64
+	// prevClose is the previous close the quote's source reported, zero when
+	// unknown or when the point is not a quote.
+	prevClose float64
 }
 
 // series is a symbol's observed prices, oldest first.
@@ -62,7 +66,7 @@ func NewQuoteBook(quotes []model.Quote) QuoteBook {
 	book := QuoteBook{bySymbol: map[string]series{}}
 	for _, quote := range quotes {
 		book.bySymbol[quote.Symbol] = append(book.bySymbol[quote.Symbol],
-			pricePoint{at: quote.AsOf, price: quote.Price})
+			pricePoint{at: quote.AsOf, price: quote.Price, prevClose: quote.PrevClose})
 	}
 	for symbol := range book.bySymbol {
 		sortSeries(book.bySymbol[symbol])
@@ -70,7 +74,9 @@ func NewQuoteBook(quotes []model.Quote) QuoteBook {
 	return book
 }
 
-// Latest implements PriceSource.
+// Latest implements PriceSource. Day change is measured from the previous close
+// the latest quote's source reported; quotes without one, like statement
+// snapshots, fall back to the last price of an earlier day.
 func (b QuoteBook) Latest(symbol string) (Quote, bool) {
 	points := b.bySymbol[symbol]
 	if len(points) == 0 {
@@ -78,6 +84,10 @@ func (b QuoteBook) Latest(symbol string) (Quote, bool) {
 	}
 	last := points[len(points)-1]
 	quote := Quote{Price: last.price, AsOf: last.at}
+	if last.prevClose > 0 {
+		quote.PrevClose = last.prevClose
+		return quote, true
+	}
 	lastDay := dayOf(last.at)
 	for i := len(points) - 2; i >= 0; i-- {
 		if dayOf(points[i].at).Before(lastDay) {

@@ -31,6 +31,21 @@ type PriceTarget struct {
 	LastFetched time.Time
 }
 
+// sessionDateLayout is how a trading day is stored.
+const sessionDateLayout = time.DateOnly
+
+// DailyClose is the latest price of a symbol's session: its close once the
+// session is over.
+type DailyClose struct {
+	Symbol string
+	// Session is the exchange-local trading day; only its date is stored.
+	Session   time.Time
+	Close     float64
+	Currency  string
+	AsOf      time.Time
+	FetchedAt time.Time
+}
+
 // IntradayPrice is one market price response for one of our symbols.
 type IntradayPrice struct {
 	Symbol    string
@@ -111,8 +126,10 @@ func PriceTargets(conn *sql.DB, provider string) ([]PriceTarget, error) {
 }
 
 // StoreIntradayPrice records a market price response and, when given, the
-// quote taken from it, together so dashboards never see one without the other.
-func StoreIntradayPrice(conn *sql.DB, price IntradayPrice, quote *model.Quote) error {
+// quote and session close taken from it, together so dashboards never see one
+// without the others.
+func StoreIntradayPrice(conn *sql.DB, price IntradayPrice, quote *model.Quote,
+	daily *DailyClose) error {
 	tx, err := conn.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin intraday price transaction: %w", err)
@@ -131,8 +148,27 @@ func StoreIntradayPrice(conn *sql.DB, price IntradayPrice, quote *model.Quote) e
 			return err
 		}
 	}
+	if daily != nil {
+		if err := storeDailyClose(tx, *daily); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit intraday price of %s: %w", price.Symbol, err)
+	}
+	return nil
+}
+
+// storeDailyClose writes the session's latest price over any stored earlier.
+func storeDailyClose(tx *sql.Tx, c DailyClose) error {
+	_, err := tx.Exec(`INSERT INTO eod_price
+		(symbol, session_date, close, currency, as_of, fetched_at) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (symbol, session_date) DO UPDATE SET close = excluded.close,
+			currency = excluded.currency, as_of = excluded.as_of, fetched_at = excluded.fetched_at`,
+		c.Symbol, c.Session.Format(sessionDateLayout), c.Close, c.Currency,
+		formatTime(c.AsOf), formatTime(c.FetchedAt))
+	if err != nil {
+		return fmt.Errorf("failed to store close of %s: %w", c.Symbol, err)
 	}
 	return nil
 }

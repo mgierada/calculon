@@ -146,6 +146,38 @@ func TestDayChangeFromEarlierDayQuote(t *testing.T) {
 	}
 }
 
+// The previous close a market data source reports beats our own history,
+// which may hold no close at all, only a mid-session snapshot.
+func TestDayChangeFromReportedPreviousClose(t *testing.T) {
+	in := testInput()
+	in.Quotes = append(in.Quotes,
+		model.Quote{Symbol: "SNT.PL", AsOf: asOf.AddDate(0, 0, -1), Price: 100},
+		model.Quote{Symbol: "SNT.PL", AsOf: asOf.Add(time.Hour), Price: 130, PrevClose: 125},
+	)
+	report := Build(in, Options{FX: fx})
+
+	snt := report.Holdings[1]
+	if !snt.Day.Known || !near(snt.Day.Amount, 50) || !near(snt.Day.Pct, 4) {
+		t.Errorf("SNT day change = %+v, want +50 (4%%) from the reported close", snt.Day)
+	}
+}
+
+// A newer quote without a reported close, like a statement imported after the
+// last poll, measures day change from history as before.
+func TestDayChangeFallsBackWhenLatestQuoteReportsNoClose(t *testing.T) {
+	in := testInput()
+	in.Quotes = append(in.Quotes,
+		model.Quote{Symbol: "SNT.PL", AsOf: asOf.AddDate(0, 0, -1), Price: 100},
+		model.Quote{Symbol: "SNT.PL", AsOf: asOf.Add(-time.Hour), Price: 110, PrevClose: 105},
+	)
+	report := Build(in, Options{FX: fx})
+
+	snt := report.Holdings[1]
+	if !snt.Day.Known || !near(snt.Day.Amount, 200) {
+		t.Errorf("SNT day change = %+v, want +200 from the earlier day's quote", snt.Day)
+	}
+}
+
 // fixedPrices is a PriceSource stub standing in for a market data API.
 type fixedPrices map[string]Quote
 

@@ -287,6 +287,9 @@ type Quote struct {
 	AsOf   time.Time
 	Price  float64
 	Source string
+	// PrevClose is the previous session's close as the source reported it,
+	// zero when it reports none.
+	PrevClose float64
 }
 
 // validateTrade checks the fields every opened trade carries.

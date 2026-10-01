@@ -124,6 +124,9 @@ CREATE TABLE IF NOT EXISTS quotes (
     price        REAL NOT NULL,
     source       TEXT NOT NULL,
     content_hash TEXT NOT NULL,
+    -- The previous session's close as the source reported it, which day
+    -- change is measured from; NULL when the source gives none, as statements.
+    prev_close   REAL,
     PRIMARY KEY (symbol, as_of)
 );
 
@@ -179,3 +182,17 @@ CREATE TABLE IF NOT EXISTS intraday_price (
 );
 
 CREATE INDEX IF NOT EXISTS idx_intraday_price_symbol ON intraday_price (symbol, fetched_at);
+
+-- The last price of each symbol's session, one row per exchange-local trading
+-- day. Every fetch overwrites its session's row, so the row for today is
+-- provisional and earlier days hold the close.
+CREATE TABLE IF NOT EXISTS eod_price (
+    symbol       TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    close        REAL NOT NULL,
+    currency     TEXT NOT NULL,
+    -- When the exchange printed the price, and when we fetched it.
+    as_of        TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (symbol, session_date)
+);

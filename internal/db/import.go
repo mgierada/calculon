@@ -275,10 +275,16 @@ func quoteRow(q model.Quote) (row, error) {
 	if q.Symbol == "" || q.AsOf.IsZero() || q.Price <= 0 {
 		return row{}, fmt.Errorf("invalid quote %+v", q)
 	}
+	data := []field{{"price", q.Price}, {"source", q.Source}}
+	// Only when known, so quotes stored before the column existed keep their
+	// hash and a re-import does not count them as updated.
+	if q.PrevClose > 0 {
+		data = append(data, field{"prev_close", q.PrevClose})
+	}
 	return row{
 		table: "quotes",
 		key:   []field{{"symbol", q.Symbol}, {"as_of", formatTime(q.AsOf)}},
-		data:  []field{{"price", q.Price}, {"source", q.Source}},
+		data:  data,
 	}, nil
 }
 
