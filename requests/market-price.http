@@ -1,0 +1,4 @@
+GET {{host}}/v1/market-price/XTB.WA
+Accept: application/json
+Authorization: Bearer {{token}}
+
