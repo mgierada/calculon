@@ -11,9 +11,10 @@ import (
 	"github.com/mgierada/calculon/internal/ui/widgets"
 )
 
-// holdingIndexKey carries a row's position in report.Holdings, so selecting a
-// row can open that holding. No column shows it.
-const holdingIndexKey = "_holding"
+// holdingIDKey identifies a row's holding by account and symbol, which stays
+// the same across reports, so selecting a row can open that holding and a
+// reload keeps the cursor on it. No column shows it.
+const holdingIDKey = "_holding"
 
 var positionColumns = []widgets.Column{
 	{Key: "symbol", Title: "Symbol", Flex: 2, Left: true},
@@ -38,22 +39,22 @@ func Positions(report *portfolio.Report) ui.Component {
 // PositionsTable renders open holdings, one row per account and symbol.
 func PositionsTable(report *portfolio.Report) *widgets.Table {
 	rows := make([]widgets.Row, 0, len(report.Holdings))
-	for i, h := range report.Holdings {
+	for _, h := range report.Holdings {
 		ccy := h.Account.Currency
 		rows = append(rows, widgets.Row{
-			holdingIndexKey: i,
-			"symbol":        h.Symbol,
-			"name":          h.Name,
-			"account":       h.Account.Label(),
-			"volume":        volume(h.Volume),
-			"avg_open":      price(h.AvgOpenPrice),
-			"price":         price(h.Price),
-			"value":         money(h.Value, ccy),
-			"pl":            deltaCell(h.PL, ""),
-			"pl_pct":        deltaPctCell(h.PL),
-			"day":           deltaPctCell(h.Day),
-			"weight":        percent(h.Weight * 100),
-			"days":          strconv.Itoa(daysHeld(h, report)),
+			holdingIDKey: holdingID(h),
+			"symbol":     h.Symbol,
+			"name":       h.Name,
+			"account":    h.Account.Label(),
+			"volume":     volume(h.Volume),
+			"avg_open":   price(h.AvgOpenPrice),
+			"price":      price(h.Price),
+			"value":      money(h.Value, ccy),
+			"pl":         deltaCell(h.PL, ""),
+			"pl_pct":     deltaPctCell(h.PL),
+			"day":        deltaPctCell(h.Day),
+			"weight":     percent(h.Weight * 100),
+			"days":       strconv.Itoa(daysHeld(h, report)),
 		})
 		addSortValues(rows[len(rows)-1], h, report)
 	}
@@ -62,14 +63,40 @@ func PositionsTable(report *portfolio.Report) *widgets.Table {
 		Filterable().
 		// Biggest winners first; s and S re-sort from there.
 		SortedBy("pl", true).
+		KeyedBy(holdingIDKey).
 		OnSelect(func(row widgets.Row) tea.Cmd {
-			i, ok := row[holdingIndexKey].(int)
-			if !ok || i >= len(report.Holdings) {
+			id, ok := row[holdingIDKey].(string)
+			if !ok {
 				return nil
 			}
-			h := report.Holdings[i]
-			return ui.Push(h.Symbol, HoldingDetail(report, h))
+			h, ok := findHolding(report, id)
+			if !ok {
+				return nil
+			}
+			return ui.Push(h.Symbol, func(report *portfolio.Report) (ui.Component, bool) {
+				h, ok := findHolding(report, id)
+				if !ok {
+					return nil, false
+				}
+				return HoldingDetail(report, h), true
+			})
 		})
+}
+
+// holdingID identifies a holding across reports.
+func holdingID(h portfolio.Holding) string {
+	key := h.Account.Key()
+	return fmt.Sprintf("%s/%s/%s", key.Provider, key.ID, h.Symbol)
+}
+
+// findHolding looks a holding up by its holdingID.
+func findHolding(report *portfolio.Report, id string) (portfolio.Holding, bool) {
+	for _, h := range report.Holdings {
+		if holdingID(h) == id {
+			return h, true
+		}
+	}
+	return portfolio.Holding{}, false
 }
 
 // addSortValues gives each numeric column its raw value to sort by. Money is

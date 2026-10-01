@@ -47,10 +47,13 @@ var (
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 )
 
-// reportMsg delivers a loaded report.
+// reportMsg delivers a loaded report. keepView rebuilds the dashboards with
+// their focus, table state and drill-downs carried over, for reloads that
+// refresh the same data rather than switch to other data.
 type reportMsg struct {
-	report portfolio.Report
-	err    error
+	report   portfolio.Report
+	err      error
+	keepView bool
 }
 
 // screen is one component tree with its own focus: a dashboard tab or a
@@ -60,6 +63,8 @@ type screen struct {
 	root   Component
 	leaves []Component
 	focus  int
+	// build rebuilds a drill-down from a new report; nil for tabs.
+	build ScreenBuilder
 }
 
 func newScreen(title string, root Component) *screen {
@@ -93,6 +98,24 @@ func (s *screen) applyFocus() {
 	}
 }
 
+// adopt carries focus and component state over from the screen this one
+// replaces. Leaves are paired by position, so it only applies when both trees
+// have the same number of them.
+func (s *screen) adopt(old *screen) {
+	if len(s.leaves) != len(old.leaves) {
+		return
+	}
+	for i, leaf := range s.leaves {
+		next, ok := leaf.(Stateful)
+		prev, wasStateful := old.leaves[i].(Stateful)
+		if ok && wasStateful {
+			next.Restore(prev.State())
+		}
+	}
+	s.focus = old.focus
+	s.applyFocus()
+}
+
 // App is the fullscreen root model: a tab per dashboard, a stack of drill-down
 // screens over the active tab, and a header and footer around them.
 type App struct {
@@ -114,6 +137,9 @@ type App struct {
 	modal  *modal
 	// prices is the market data feed, nil when the app has none.
 	prices *prices
+	// staleView marks new prices held back while a component takes text, so
+	// the rebuild does not drop what is being typed.
+	staleView bool
 }
 
 // modal is a picker drawn over the screen, taking every key while open.
@@ -140,9 +166,9 @@ func Run(app *App, opts ...tea.ProgramOption) error {
 // and listening for new prices when there is a feed.
 func (a *App) Init() tea.Cmd {
 	if a.splash == nil {
-		return tea.Batch(a.reload(), a.waitPrices())
+		return tea.Batch(a.reload(false), a.waitPrices())
 	}
-	return tea.Batch(a.reload(), a.waitPrices(), a.splash.tick())
+	return tea.Batch(a.reload(false), a.waitPrices(), a.splash.tick())
 }
 
 // Update handles app-level messages and keys, then forwards the rest.
@@ -171,7 +197,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pricesMsg:
 		return a, a.handlePrices(msg)
 	case PushMsg:
-		return a, a.push(newScreen(msg.Title, msg.Screen))
+		return a, a.push(msg)
 	case tea.KeyPressMsg:
 		return a, a.handleKey(msg)
 	}
@@ -200,8 +226,9 @@ func (a *App) View() tea.View {
 	return view
 }
 
-// handleReport rebuilds every dashboard from a freshly loaded report. Open
-// drill-downs are closed because they were built from the old one.
+// handleReport rebuilds every dashboard from a freshly loaded report. Unless
+// the reload keeps the view, open drill-downs are closed and every dashboard
+// starts afresh.
 func (a *App) handleReport(msg reportMsg) tea.Cmd {
 	a.err = msg.err
 	if msg.err != nil {
@@ -211,14 +238,39 @@ func (a *App) handleReport(msg reportMsg) tea.Cmd {
 	if a.report.Scope == nil {
 		a.summaryBase = a.report.Base
 	}
-	a.stack = nil
+
+	oldTabs, oldStack := a.tabs, a.stack
+	if !msg.keepView {
+		oldTabs, oldStack = nil, nil
+	}
 	a.tabs = make([]*screen, len(a.dashboards))
-	cmds := make([]tea.Cmd, len(a.dashboards))
+	cmds := make([]tea.Cmd, 0, len(a.dashboards)+len(oldStack))
 	for i, dashboard := range a.dashboards {
 		a.tabs[i] = newScreen(dashboard.Title, dashboard.Build(a.report))
-		cmds[i] = a.tabs[i].root.Init()
+		cmds = append(cmds, a.tabs[i].root.Init())
 	}
+	a.stack = nil
+	for _, old := range oldStack {
+		root, ok := old.build(a.report)
+		if !ok {
+			break
+		}
+		s := newScreen(old.title, root)
+		s.build = old.build
+		a.stack = append(a.stack, s)
+		cmds = append(cmds, root.Init())
+	}
+
+	// State is restored once sized: a table's page depends on its height.
 	a.resize()
+	for i, old := range oldTabs {
+		if i < len(a.tabs) {
+			a.tabs[i].adopt(old)
+		}
+	}
+	for i, s := range a.stack {
+		s.adopt(oldStack[i])
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -240,7 +292,12 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	current := a.current()
 	if capturer, ok := focusedOf(current).(InputCapturer); ok && capturer.CapturingInput() {
-		return current.focused().Update(msg)
+		cmd := current.focused().Update(msg)
+		if a.staleView && !capturer.CapturingInput() {
+			a.staleView = false
+			return tea.Batch(cmd, a.reload(true))
+		}
+		return cmd
 	}
 
 	switch key {
@@ -256,7 +313,7 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case keyReload:
-		return a.reload()
+		return a.reload(true)
 	case keyTabPrev, keyTabNext:
 		step := 1
 		if key == keyTabPrev {
@@ -290,12 +347,13 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// reload fetches a new report for the current scope off the UI loop.
-func (a *App) reload() tea.Cmd {
+// reload fetches a new report for the current scope off the UI loop,
+// keeping the view across it when keepView is set.
+func (a *App) reload(keepView bool) tea.Cmd {
 	load, scope := a.load, a.scope
 	return func() tea.Msg {
 		report, err := load(scope)
-		return reportMsg{report: report, err: err}
+		return reportMsg{report: report, err: err, keepView: keepView}
 	}
 }
 
@@ -349,7 +407,7 @@ func (a *App) accountPicker() *modal {
 			} else {
 				a.scope = nil
 			}
-			return a.reload()
+			return a.reload(false)
 		},
 	}
 }
@@ -361,8 +419,17 @@ func (a *App) summaryCurrency() string {
 	return a.summaryBase
 }
 
-// push opens a drill-down screen.
-func (a *App) push(s *screen) tea.Cmd {
+// push builds a requested drill-down from the current report and opens it.
+func (a *App) push(msg PushMsg) tea.Cmd {
+	if a.report == nil {
+		return nil
+	}
+	root, ok := msg.Build(a.report)
+	if !ok {
+		return nil
+	}
+	s := newScreen(msg.Title, root)
+	s.build = msg.Build
 	a.stack = append(a.stack, s)
 	s.root.SetSize(a.bodySize())
 	return s.root.Init()

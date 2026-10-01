@@ -82,6 +82,8 @@ type Table struct {
 	sortable   bool
 	sortColumn int
 	sortDesc   bool
+	// rowKey identifies rows across rebuilds; see KeyedBy.
+	rowKey string
 }
 
 // NewTable builds a table from neutral column and row descriptions.

@@ -103,7 +103,11 @@ func TestPositionsSelectOpensDetail(t *testing.T) {
 		t.Errorf("pushed %q, want the first holding %q", push.Title, report.Holdings[0].Symbol)
 	}
 
-	detail := render(push.Screen, 160, 40)
+	screen, ok := push.Build(report)
+	if !ok {
+		t.Fatal("detail could not be built from the report it was opened from")
+	}
+	detail := render(screen, 160, 40)
 	if !strings.Contains(detail, "open lots") || !strings.Contains(detail, "closed "+push.Title) {
 		t.Errorf("detail screen:\n%s", detail)
 	}
@@ -263,5 +267,43 @@ func TestOverviewStatsShowEveryNoteWhenNarrow(t *testing.T) {
 		if !found {
 			t.Errorf("%s card at 160 columns lost %q; cards: %q", card, want, cards)
 		}
+	}
+}
+
+// A price refresh that reorders positions must leave the cursor on the same
+// holding, or enter opens a different one than the user picked.
+func TestPositionsCursorFollowsHoldingAcrossRefresh(t *testing.T) {
+	old := PositionsTable(testReport())
+	old.SetSize(200, 20)
+	old.SetFocused(true)
+	old.Update(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+
+	refreshed := testReport()
+	for i := range refreshed.Holdings {
+		if refreshed.Holdings[i].Symbol == "CDR.PL" {
+			refreshed.Holdings[i].PL.Amount = 10_000
+		}
+	}
+	table := PositionsTable(refreshed)
+	table.SetSize(200, 20)
+	table.SetFocused(true)
+	table.Restore(old.State())
+
+	cmd := table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if push, ok := cmd().(ui.PushMsg); !ok || push.Title != "CDR.PL" {
+		t.Errorf("enter opens %+v, want CDR.PL, the row the cursor was on", cmd())
+	}
+}
+
+func TestHoldingDetailClosesOnceHoldingIsGone(t *testing.T) {
+	table := PositionsTable(testReport())
+	table.SetSize(160, 20)
+	table.SetFocused(true)
+	push := table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))().(ui.PushMsg)
+
+	sold := testReport()
+	sold.Holdings = nil
+	if _, ok := push.Build(sold); ok {
+		t.Error("detail rebuilt for a holding no longer held")
 	}
 }

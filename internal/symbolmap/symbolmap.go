@@ -35,15 +35,22 @@ var finimpulseSuffixes = map[string]string{
 // ToFinimpulse names symbol the way finimpulse does. It reports false for
 // symbols without a known exchange suffix, such as XTB's CFDs (US500, GOLD).
 func ToFinimpulse(symbol string) (string, bool) {
+	suffix := Suffix(symbol)
+	providerSuffix, ok := finimpulseSuffixes[suffix]
+	if suffix == "" || !ok {
+		return "", false
+	}
+	return strings.TrimSuffix(symbol, suffix) + providerSuffix, true
+}
+
+// Suffix is the exchange suffix of an XTB symbol, dot included, e.g. ".PL",
+// or empty when it has none.
+func Suffix(symbol string) string {
 	dot := strings.LastIndex(symbol, ".")
 	if dot <= 0 {
-		return "", false
+		return ""
 	}
-	suffix, ok := finimpulseSuffixes[symbol[dot:]]
-	if !ok {
-		return "", false
-	}
-	return symbol[:dot] + suffix, true
+	return symbol[dot:]
 }
 
 // Sync stores a finimpulse mapping for every held symbol that has one. Stored

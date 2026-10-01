@@ -155,7 +155,7 @@ func TestAppSwitchesDashboardsWithNumberKeys(t *testing.T) {
 func TestAppPushesAndPopsDrillDowns(t *testing.T) {
 	app := loadedApp(t, &stub{name: "table"})
 
-	app.Update(PushMsg{Title: "SNT.PL", Screen: &stub{name: "detail"}})
+	app.Update(PushMsg{Title: "SNT.PL", Build: fixedScreen(&stub{name: "detail"})})
 	if view := app.View().Content; !strings.Contains(view, "detail") || !strings.Contains(view, "SNT.PL") {
 		t.Errorf("pushed screen not shown:\n%s", view)
 	}
@@ -302,4 +302,9 @@ func TestAppAccountPickerRescopesAndReloads(t *testing.T) {
 	if last := requested[len(requested)-1]; last != nil {
 		t.Errorf("reload scope = %v, want the summary", last)
 	}
+}
+
+// fixedScreen builds the same drill-down from any report.
+func fixedScreen(root Component) ScreenBuilder {
+	return func(*portfolio.Report) (Component, bool) { return root, true }
 }

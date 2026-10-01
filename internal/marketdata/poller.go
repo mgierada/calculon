@@ -38,7 +38,9 @@ type Update struct {
 }
 
 // Poller fetches every held symbol once its stored price is older than the
-// interval, so a restart soon after a poll calls the API for nothing.
+// interval while its exchange trades, plus once after the close for the closing
+// price. A restart soon after a poll, or outside trading hours once the close
+// is stored, calls the API for nothing.
 type Poller struct {
 	conn     *sql.DB
 	fetcher  Fetcher
@@ -97,8 +99,9 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 }
 
-// poll fetches every stale target and returns when the next one falls due. A
-// failed fetch waits a full interval rather than retrying in a hot loop.
+// poll fetches every due target and returns when the next one falls due, at
+// most an interval away so newly imported symbols are picked up. A failed
+// fetch waits that interval rather than retrying in a hot loop.
 func (p *Poller) poll(ctx context.Context) time.Time {
 	now := p.now()
 	next := now.Add(p.interval)
@@ -111,7 +114,7 @@ func (p *Poller) poll(ctx context.Context) time.Time {
 
 	update := Update{At: now}
 	for _, target := range targets {
-		if due := target.LastFetched.Add(p.interval); !target.LastFetched.IsZero() && due.After(now) {
+		if due := dueAt(target.Symbol, target.LastFetched, p.interval); due.After(now) {
 			next = earliest(next, due)
 			continue
 		}

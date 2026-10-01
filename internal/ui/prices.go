@@ -39,11 +39,16 @@ func (a *App) waitPrices() tea.Cmd {
 	}
 }
 
-// handlePrices remembers the poll for the footer, reloads and waits again.
+// handlePrices remembers the poll for the footer, reloads keeping the view and
+// waits again. While a component takes text the reload waits until it is done.
 func (a *App) handlePrices(msg pricesMsg) tea.Cmd {
 	update := marketdata.Update(msg)
 	a.prices.last = &update
-	return tea.Batch(a.reload(), a.waitPrices())
+	if capturer, ok := focusedOf(a.current()).(InputCapturer); ok && capturer.CapturingInput() {
+		a.staleView = true
+		return a.waitPrices()
+	}
+	return tea.Batch(a.reload(true), a.waitPrices())
 }
 
 // pricesStatus describes the last poll for the footer, warning about symbols

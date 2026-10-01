@@ -9,6 +9,8 @@ package ui
 
 import (
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/mgierada/calculon/internal/portfolio"
 )
 
 // Component is one widget in a layout. The grid owns placement and sizing and
@@ -45,14 +47,28 @@ type HeightFitter interface {
 	HeightFor(width int) int
 }
 
+// Stateful is implemented by components holding view state worth keeping when
+// a reload rebuilds them, like a table's sort and cursor. Restore receives what
+// State returned on the component being replaced, and ignores state it does
+// not recognise.
+type Stateful interface {
+	State() any
+	Restore(state any)
+}
+
+// ScreenBuilder builds a drill-down screen from a report. It runs again on
+// every reload that keeps the view, and reports false once what the screen
+// shows is gone from the report, which closes it.
+type ScreenBuilder func(report *portfolio.Report) (Component, bool)
+
 // PushMsg asks the app to open a drill-down screen on top of the current one.
 type PushMsg struct {
-	Title  string
-	Screen Component
+	Title string
+	Build ScreenBuilder
 }
 
 // Push returns a command that opens a drill-down screen. Widgets return it from
 // Update, e.g. when a table row is selected.
-func Push(title string, screen Component) tea.Cmd {
-	return func() tea.Msg { return PushMsg{Title: title, Screen: screen} }
+func Push(title string, build ScreenBuilder) tea.Cmd {
+	return func() tea.Msg { return PushMsg{Title: title, Build: build} }
 }
