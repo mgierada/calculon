@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // chdirWithEnvFile runs the test from a directory holding the given .env.
@@ -49,7 +50,7 @@ func TestLoadWithoutEnvFileAppliesDefaults(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 	if cfg.DBConfig.DBPath != "./calculon.db" || cfg.CalculonConfig.SSHAddr != ":2222" ||
-		cfg.CalculonConfig.BaseCurrency != "PLN" {
+		cfg.CalculonConfig.BaseCurrency != "PLN" || cfg.FinimpulseConfig.PollInterval != 15*time.Minute {
 		t.Errorf("cfg = %+v", cfg)
 	}
 }

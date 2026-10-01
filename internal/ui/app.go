@@ -112,6 +112,8 @@ type App struct {
 	// splash is shown until the app is ready, nil once gone or never wanted.
 	splash *splashState
 	modal  *modal
+	// prices is the market data feed, nil when the app has none.
+	prices *prices
 }
 
 // modal is a picker drawn over the screen, taking every key while open.
@@ -134,12 +136,13 @@ func Run(app *App, opts ...tea.ProgramOption) error {
 	return nil
 }
 
-// Init loads the first report, starting the splash clock when there is one.
+// Init loads the first report, starting the splash clock when there is one
+// and listening for new prices when there is a feed.
 func (a *App) Init() tea.Cmd {
 	if a.splash == nil {
-		return a.reload()
+		return tea.Batch(a.reload(), a.waitPrices())
 	}
-	return tea.Batch(a.reload(), a.splash.tick())
+	return tea.Batch(a.reload(), a.waitPrices(), a.splash.tick())
 }
 
 // Update handles app-level messages and keys, then forwards the rest.
@@ -165,6 +168,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.dismissSplash()
 		}
 		return a, a.handleReport(msg)
+	case pricesMsg:
+		return a, a.handlePrices(msg)
 	case PushMsg:
 		return a, a.push(newScreen(msg.Title, msg.Screen))
 	case tea.KeyPressMsg:
@@ -458,10 +463,18 @@ func (a *App) footer() string {
 	if !a.report.AsOf.IsZero() {
 		info = append(info, "as of "+a.report.AsOf.Format("2006-01-02 15:04 MST"))
 	}
+	pricesInfo, pricesWarning := a.pricesStatus()
+	if pricesInfo != "" {
+		info = append(info, pricesInfo)
+	}
 	info = append(info, a.report.FXNote)
 	left := footerStyle.Render(" " + strings.Join(info, " · "))
-	if len(a.report.Warnings) > 0 {
-		left += warningStyle.Render(" · ⚠ " + a.report.Warnings[0])
+	warnings := a.report.Warnings
+	if pricesWarning != "" {
+		warnings = append([]string{pricesWarning}, warnings...)
+	}
+	if len(warnings) > 0 {
+		left += warningStyle.Render(" · ⚠ " + warnings[0])
 	}
 	return fill(left, hint, a.width)
 }

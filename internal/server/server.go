@@ -22,6 +22,7 @@ import (
 
 	"github.com/mgierada/calculon/internal/auth"
 	"github.com/mgierada/calculon/internal/db"
+	"github.com/mgierada/calculon/internal/marketdata"
 	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/portfolio"
 	"github.com/mgierada/calculon/internal/ui"
@@ -37,6 +38,8 @@ type Options struct {
 	Conn        *sql.DB
 	Dashboards  []ui.Dashboard
 	Report      portfolio.Options
+	// Prices reloads every session's dashboards on new prices; nil for none.
+	Prices *marketdata.Poller
 }
 
 // Run serves until ctx is cancelled, then shuts down gracefully.
@@ -111,6 +114,15 @@ func handler(opts Options) bubbletea.Handler {
 			return portfolio.Load(opts.Conn, user, opts.Report, scope)
 		}
 		splash := ui.Splash{User: user.Name, MinDuration: ui.DefaultSplashDuration}
-		return ui.NewApp(opts.Dashboards, load).WithSplash(splash), nil
+		app := ui.NewApp(opts.Dashboards, load).WithSplash(splash)
+		if opts.Prices != nil {
+			updates, unsubscribe := opts.Prices.Subscribe()
+			go func() {
+				<-sess.Context().Done()
+				unsubscribe()
+			}()
+			app.WithPrices(updates)
+		}
+		return app, nil
 	}
 }

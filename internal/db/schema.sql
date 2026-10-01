@@ -126,3 +126,56 @@ CREATE TABLE IF NOT EXISTS quotes (
     content_hash TEXT NOT NULL,
     PRIMARY KEY (symbol, as_of)
 );
+
+-- How a market data provider names each of our symbols, e.g. XTB.PL is
+-- XTB.WA at finimpulse. Rows are seeded from suffix rules and never
+-- overwritten, so a mapping fixed by hand sticks.
+CREATE TABLE IF NOT EXISTS symbol_map (
+    symbol          TEXT NOT NULL,
+    provider        TEXT NOT NULL,
+    provider_symbol TEXT NOT NULL,
+    PRIMARY KEY (symbol, provider)
+);
+
+-- Every finimpulse market price response, kept whole. symbol is ours,
+-- provider_symbol the one finimpulse answered for; fetched_at is our clock.
+-- Nullable columns are null when the API sent null.
+CREATE TABLE IF NOT EXISTS intraday_price (
+    id                                  INTEGER PRIMARY KEY,
+    symbol                              TEXT NOT NULL,
+    fetched_at                          TEXT NOT NULL,
+    task_id                             TEXT NOT NULL,
+    status_code                         INTEGER NOT NULL,
+    status_message                      TEXT NOT NULL,
+    live                                INTEGER NOT NULL,
+    cost                                REAL NOT NULL,
+    provider_symbol                     TEXT NOT NULL,
+    name                                TEXT NOT NULL,
+    quote_type                          TEXT NOT NULL,
+    currency                            TEXT NOT NULL,
+    regular_market_volume               INTEGER,
+    market_cap                          INTEGER,
+    usd_rate                            REAL,
+    market_state                        TEXT NOT NULL,
+    regular_market_open                 REAL,
+    regular_market_previous_close       REAL,
+    current_price                       REAL,
+    current_price_usd                   REAL,
+    current_price_change                REAL,
+    current_price_change_percent        REAL,
+    current_price_update_time           TEXT,
+    regular_market_price                REAL,
+    regular_market_price_change         REAL,
+    regular_market_price_change_percent REAL,
+    regular_market_time                 TEXT,
+    pre_market_price                    REAL,
+    pre_market_price_change             REAL,
+    pre_market_price_change_percent     REAL,
+    pre_market_time                     TEXT,
+    post_market_price                   REAL,
+    post_market_price_change            REAL,
+    post_market_price_change_percent    REAL,
+    post_market_time                    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_intraday_price_symbol ON intraday_price (symbol, fetched_at);

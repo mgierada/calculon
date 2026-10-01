@@ -17,6 +17,8 @@ import (
 	"github.com/mgierada/calculon/internal/config"
 	"github.com/mgierada/calculon/internal/data_processing/parsers"
 	"github.com/mgierada/calculon/internal/db"
+	"github.com/mgierada/calculon/internal/finimpulse"
+	"github.com/mgierada/calculon/internal/marketdata"
 	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/portfolio"
 	"github.com/mgierada/calculon/internal/server"
@@ -95,8 +97,17 @@ func runUI(args []string) error {
 	load := func(scope *model.AccountKey) (portfolio.Report, error) {
 		return portfolio.Load(env.conn, user, env.report, scope)
 	}
+
+	// Failures go to the footer only: logging would draw over the dashboards.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	poller := newPoller(env, nil)
+	updates, unsubscribe := poller.Subscribe()
+	defer unsubscribe()
+	go poller.Run(ctx)
+
 	splash := ui.Splash{User: user.Name, MinDuration: ui.DefaultSplashDuration}
-	return ui.Run(ui.NewApp(dashboards.All(), load).WithSplash(splash))
+	return ui.Run(ui.NewApp(dashboards.All(), load).WithSplash(splash).WithPrices(updates))
 }
 
 // runServe serves the dashboards over SSH until interrupted.
@@ -110,13 +121,24 @@ func runServe() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	poller := newPoller(env, log.Printf)
+	go poller.Run(ctx)
+
 	return server.Run(ctx, server.Options{
 		Addr:        env.cfg.CalculonConfig.SSHAddr,
 		HostKeyPath: env.cfg.CalculonConfig.SSHHostKey,
 		Conn:        env.conn,
 		Dashboards:  dashboards.All(),
 		Report:      env.report,
+		Prices:      poller,
 	})
+}
+
+// newPoller keeps held symbols priced from finimpulse; logf receives failures.
+func newPoller(e env, logf func(format string, args ...any)) *marketdata.Poller {
+	cfg := e.cfg.FinimpulseConfig
+	client := finimpulse.New(cfg.BaseURL, cfg.Token)
+	return marketdata.NewPoller(e.conn, client, cfg.PollInterval, logf)
 }
 
 // runImport parses each statement and stores it for a user.
