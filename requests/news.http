@@ -1,0 +1,22 @@
+
+POST {{host}}/v1/news
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "symbol": "XTB.WA",
+  "types": [
+    "news"
+  ],
+  "start_date": "2026-01-01",
+  "end_date": "2026-10-01",
+  "limit": 3,
+  "offset": 0,
+  "sort_by": [
+    {
+      "selector": "pub_date",
+      "desc": true
+    }
+  ]
+}
