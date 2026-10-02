@@ -39,6 +39,14 @@ type InputCapturer interface {
 	CapturingInput() bool
 }
 
+// ShortcutHandler is implemented by components with keys that work wherever
+// focus is on their screen, like a chart's toggle. Such a key goes to the
+// component claiming it ahead of the focused one, unless that one is taking
+// text.
+type ShortcutHandler interface {
+	HandlesShortcut(key string) bool
+}
+
 // HeightFitter is implemented by components whose content needs more lines
 // when they are narrow, like a card whose text wraps. A grid row with
 // AutoHeight grows to the tallest height its cells ask for.

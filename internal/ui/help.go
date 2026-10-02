@@ -44,7 +44,7 @@ var bindingGroups = []struct {
 		{"esc (filter)", "clear filter"},
 		{"shift+→ / shift+←", "scroll columns"},
 	}},
-	{"Charts", []binding{
+	{"Overview", []binding{
 		{"g", "allocation: change grouping"},
 		{"m", "returns: cycle TWR / XIRR / CAGR"},
 	}},

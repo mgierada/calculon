@@ -33,7 +33,9 @@ func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Re
 		return Report{}, err
 	}
 	if scope == nil {
-		return Build(in, opts), nil
+		report := Build(in, opts)
+		report.AccountReturns = AccountReturns(in, opts)
+		return report, nil
 	}
 
 	all := in.Accounts

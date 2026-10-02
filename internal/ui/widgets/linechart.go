@@ -18,6 +18,8 @@ var seriesPalette = []color.Color{
 	lipgloss.Color("214"),
 	lipgloss.Color("42"),
 	lipgloss.Color("170"),
+	lipgloss.Color("203"),
+	lipgloss.Color("116"),
 }
 
 // Point is one value of a time series.

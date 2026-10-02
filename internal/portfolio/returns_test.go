@@ -154,3 +154,29 @@ func TestTWRIsTheDefaultMetric(t *testing.T) {
 		t.Errorf("metrics = %v, want TWR first and the only cumulative one", ReturnMetrics)
 	}
 }
+
+// Each account's line must match what choosing that account alone shows.
+func TestAccountReturnsMatchScopedReports(t *testing.T) {
+	in := testInput()
+	returns := AccountReturns(in, Options{FX: fx})
+
+	if len(returns) != 2 || returns[0].Account != pln || returns[1].Account != usd {
+		t.Fatalf("returns = %+v, want one per account in order", returns)
+	}
+	for _, r := range returns {
+		scoped, opts, _ := Scope(in, Options{FX: fx}, r.Account.Key())
+		want := Build(scoped, opts).Returns
+		if r.Returns.TWR != want.TWR || len(r.Returns.Series) != len(want.Series) {
+			t.Errorf("%s TWR = %+v, want the scoped report's %+v", r.Account.ID, r.Returns.TWR, want.TWR)
+		}
+	}
+}
+
+func TestAccountReturnsSkipsSingleAccount(t *testing.T) {
+	in := testInput()
+	in.Accounts = in.Accounts[:1]
+
+	if returns := AccountReturns(in, Options{FX: fx}); returns != nil {
+		t.Errorf("returns = %+v, want none for one account", returns)
+	}
+}

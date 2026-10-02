@@ -341,8 +341,25 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
+	if handler := shortcutHandler(current, key); handler != nil {
+		return handler.Update(msg)
+	}
 	if focused := focusedOf(current); focused != nil {
 		return focused.Update(msg)
+	}
+	return nil
+}
+
+// shortcutHandler is the component on the screen that claims key as a
+// screen-wide shortcut, nil when none does.
+func shortcutHandler(s *screen, key string) Component {
+	if s == nil {
+		return nil
+	}
+	for _, leaf := range s.leaves {
+		if handler, ok := leaf.(ShortcutHandler); ok && handler.HandlesShortcut(key) {
+			return leaf
+		}
 	}
 	return nil
 }

@@ -128,8 +128,11 @@ type Report struct {
 	Totals    Totals
 	History   []ValuePoint
 	Returns   Returns
-	Closed    []model.Owned[model.Position]
-	CashOps   []model.Owned[model.CashOp]
+	// AccountReturns holds each account's own returns next to the combined
+	// ones, set on the summary of several accounts.
+	AccountReturns []AccountReturn
+	Closed         []model.Owned[model.Position]
+	CashOps        []model.Owned[model.CashOp]
 	// Warnings are data problems worth surfacing, e.g. a missing FX rate.
 	Warnings []string
 }

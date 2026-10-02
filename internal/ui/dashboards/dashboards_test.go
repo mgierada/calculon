@@ -338,3 +338,43 @@ func TestStaleDayChangeIsLabelledWithItsSession(t *testing.T) {
 		t.Errorf("total card does not say what it leaves out:\n%s", view)
 	}
 }
+
+func TestReturnChartShowsEveryAccountBesideAll(t *testing.T) {
+	report := testReport()
+	ike := model.Account{Provider: model.ProviderXTB, ID: "51099570", Currency: "PLN", Name: "IKE"}
+	report.AccountReturns = []portfolio.AccountReturn{
+		{Account: account, Returns: report.Returns},
+		{Account: ike, Returns: report.Returns},
+	}
+
+	view := render(NewReturnChart(report), 120, 20)
+	for _, want := range []string{"all", account.ID, "IKE"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("legend is missing %q:\n%s", want, view)
+		}
+	}
+	if single := render(NewReturnChart(testReport()), 120, 20); strings.Contains(single, "all") {
+		t.Errorf("a single account's chart is labelled all:\n%s", single)
+	}
+}
+
+// g and m reach their charts from anywhere on the overview, e.g. with the
+// accounts table focused.
+func TestOverviewChartKeysWorkWithoutFocus(t *testing.T) {
+	report := testReport()
+	app := ui.NewApp([]ui.Dashboard{{Title: "Overview", Build: Overview}},
+		func(*model.AccountKey) (portfolio.Report, error) { return *report, nil })
+	app.Update(app.Init()())
+	app.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
+
+	app.Update(tea.KeyPressMsg(tea.Key{Text: "g", Code: 'g'}))
+	app.Update(tea.KeyPressMsg(tea.Key{Text: "m", Code: 'm'}))
+
+	view := app.View().Content
+	if !strings.Contains(view, "% of portfolio by account") {
+		t.Errorf("g did not regroup the allocation chart:\n%s", view)
+	}
+	if !strings.Contains(view, "XIRR over time") {
+		t.Errorf("m did not switch the return chart:\n%s", view)
+	}
+}

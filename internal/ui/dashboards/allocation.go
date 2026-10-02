@@ -34,6 +34,28 @@ func NewAllocationChart(report *portfolio.Report) *AllocationChart {
 	return chart
 }
 
+// HandlesShortcut implements ui.ShortcutHandler: g works from anywhere on the
+// screen.
+func (a *AllocationChart) HandlesShortcut(key string) bool {
+	return key == groupingKey
+}
+
+// State implements ui.Stateful, so a refresh keeps the grouping.
+func (a *AllocationChart) State() any {
+	return allocationState(a.grouping)
+}
+
+// Restore implements ui.Stateful.
+func (a *AllocationChart) Restore(state any) {
+	if grouping, ok := state.(allocationState); ok && int(grouping) < len(portfolio.Groupings) {
+		a.grouping = int(grouping)
+		a.refresh()
+	}
+}
+
+// allocationState is the grouping an allocation chart shows.
+type allocationState int
+
 // Update implements ui.Component, handling the grouping toggle.
 func (a *AllocationChart) Update(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == groupingKey {

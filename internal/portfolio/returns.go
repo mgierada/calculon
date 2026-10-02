@@ -3,6 +3,8 @@ package portfolio
 import (
 	"math"
 	"time"
+
+	"github.com/mgierada/calculon/internal/model"
 )
 
 // ReturnMetric is a way of annualizing the portfolio's return.
@@ -95,6 +97,33 @@ func (r Returns) Latest(metric ReturnMetric) Delta {
 	default:
 		return r.TWR
 	}
+}
+
+// AccountReturn is one account's returns, valued as when that account alone
+// is chosen.
+type AccountReturn struct {
+	Account model.Account
+	Returns Returns
+}
+
+// AccountReturns values each account on its own, in its own currency, so
+// their returns can be compared; nil with fewer than two accounts, where the
+// combined returns already are the account's.
+func AccountReturns(in Input, opts Options) []AccountReturn {
+	if len(in.Accounts) < 2 {
+		return nil
+	}
+	returns := make([]AccountReturn, 0, len(in.Accounts))
+	for _, account := range in.Accounts {
+		scoped, scopedOpts, ok := Scope(in, opts, account.Key())
+		if !ok {
+			continue
+		}
+		returns = append(returns, AccountReturn{
+			Account: account.Account, Returns: Build(scoped, scopedOpts).Returns,
+		})
+	}
+	return returns
 }
 
 // flow is money moved into (positive) or out of the portfolio on one day.
