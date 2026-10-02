@@ -3,6 +3,7 @@
 package finimpulse
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -68,12 +69,33 @@ func (e *APIError) Error() string {
 
 // get requests path and decodes the response into Response[T].
 func get[T any](ctx context.Context, c *Client, path string) (Response[T], error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	return do[T](ctx, c, http.MethodGet, path, nil)
+}
+
+// post sends payload to path as JSON and decodes the response into Response[T].
+func post[T any](ctx context.Context, c *Client, path string, payload any) (Response[T], error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return Response[T]{}, fmt.Errorf("finimpulse %s: failed to encode request: %w", path, err)
+	}
+	return do[T](ctx, c, http.MethodPost, path, encoded)
+}
+
+// do sends one request, with body as JSON when given, and decodes the response.
+func do[T any](ctx context.Context, c *Client, method, path string, body []byte) (Response[T], error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return Response[T]{}, fmt.Errorf("finimpulse %s: %w", path, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -81,15 +103,15 @@ func get[T any](ctx context.Context, c *Client, path string) (Response[T], error
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return Response[T]{}, fmt.Errorf("finimpulse %s: failed to read body: %w", path, err)
 	}
 
 	var decoded Response[T]
-	decodeErr := json.Unmarshal(body, &decoded)
+	decodeErr := json.Unmarshal(respBody, &decoded)
 	if resp.StatusCode != http.StatusOK || (decodeErr == nil && decoded.StatusCode != statusOK) {
-		return Response[T]{}, apiError(path, resp.StatusCode, decoded.Meta, body)
+		return Response[T]{}, apiError(path, resp.StatusCode, decoded.Meta, respBody)
 	}
 	if decodeErr != nil {
 		return Response[T]{}, fmt.Errorf("finimpulse %s: failed to decode body: %w", path, decodeErr)

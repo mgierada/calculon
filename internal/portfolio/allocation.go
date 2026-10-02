@@ -101,3 +101,21 @@ func groupLabel(h Holding, grouping Grouping) string {
 		return h.Symbol
 	}
 }
+
+// TopSymbols lists the n symbols worth the most, biggest first, a symbol held
+// in several accounts counting their value together.
+func TopSymbols(holdings []Holding, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	value := map[string]float64{}
+	var symbols []string
+	for _, h := range holdings {
+		if _, seen := value[h.Symbol]; !seen {
+			symbols = append(symbols, h.Symbol)
+		}
+		value[h.Symbol] += h.ValueBase
+	}
+	sort.SliceStable(symbols, func(i, j int) bool { return value[symbols[i]] > value[symbols[j]] })
+	return symbols[:min(n, len(symbols))]
+}

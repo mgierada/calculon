@@ -20,6 +20,7 @@ import (
 	"github.com/mgierada/calculon/internal/finimpulse"
 	"github.com/mgierada/calculon/internal/marketdata"
 	"github.com/mgierada/calculon/internal/model"
+	"github.com/mgierada/calculon/internal/news"
 	"github.com/mgierada/calculon/internal/portfolio"
 	"github.com/mgierada/calculon/internal/server"
 	"github.com/mgierada/calculon/internal/ui"
@@ -107,7 +108,8 @@ func runUI(args []string) error {
 	go poller.Run(ctx)
 
 	splash := ui.Splash{User: user.Name, MinDuration: ui.DefaultSplashDuration}
-	return ui.Run(ui.NewApp(dashboards.All(), load).WithSplash(splash).WithPrices(updates))
+	app := ui.NewApp(dashboards.All(newsRefresher(env)), load)
+	return ui.Run(app.WithSplash(splash).WithPrices(updates))
 }
 
 // runServe serves the dashboards over SSH until interrupted.
@@ -128,10 +130,40 @@ func runServe() error {
 		Addr:        env.cfg.CalculonConfig.SSHAddr,
 		HostKeyPath: env.cfg.CalculonConfig.SSHHostKey,
 		Conn:        env.conn,
-		Dashboards:  dashboards.All(),
+		Dashboards:  dashboards.All(newsRefresher(env)),
 		Report:      env.report,
 		Prices:      poller,
 	})
+}
+
+// newsRefresher fetches news about the report's top holdings from finimpulse,
+// reporting each symbol as it goes.
+func newsRefresher(e env) ui.Refresher {
+	cfg := e.cfg.FinimpulseConfig
+	fetcher := news.NewFetcher(e.conn, finimpulse.New(cfg.BaseURL, cfg.Token),
+		cfg.NewsPerSymbol, cfg.NewsLookback)
+	return func(ctx context.Context, report *portfolio.Report, progress func(ui.Progress)) (string, error) {
+		result, err := fetcher.Fetch(ctx, report.NewsSymbols, func(step news.Step) {
+			progress(newsProgress(step))
+		})
+		summary := fmt.Sprintf("news: %d new", result.Added)
+		if len(result.Failed) > 0 {
+			summary += fmt.Sprintf(", %d failed", len(result.Failed))
+		}
+		return summary, err
+	}
+}
+
+// newsProgress describes a news fetch step for the progress box.
+func newsProgress(step news.Step) ui.Progress {
+	p := ui.Progress{Done: step.Done, Total: step.Total, Current: step.Current}
+	if f := step.Finished; f != nil {
+		p.Finished, p.Detail = f.Symbol, fmt.Sprintf("%d new", f.Added)
+		if f.Err != nil {
+			p.Detail, p.Failed = f.Err.Error(), true
+		}
+	}
+	return p
 }
 
 // newPoller keeps held symbols priced from finimpulse; logf receives failures.
@@ -371,9 +403,15 @@ func openEnv() (env, error) {
 		return env{}, err
 	}
 	return env{
-		cfg:    cfg,
-		conn:   conn,
-		report: portfolio.Options{FX: portfolio.NewStaticFX(cfg.CalculonConfig.BaseCurrency, rates)},
+		cfg:  cfg,
+		conn: conn,
+		report: portfolio.Options{
+			FX: portfolio.NewStaticFX(cfg.CalculonConfig.BaseCurrency, rates),
+			News: portfolio.NewsOptions{
+				Positions: cfg.FinimpulseConfig.NewsPositions,
+				PerSymbol: cfg.FinimpulseConfig.NewsPerSymbol,
+			},
+		},
 	}, nil
 }
 

@@ -8,11 +8,13 @@ import (
 	"github.com/mgierada/calculon/internal/ui"
 )
 
-// All lists the dashboards in tab order.
-func All() []ui.Dashboard {
+// All lists the dashboards in tab order. fetchNews runs when r is pressed on
+// the News tab; nil leaves r a plain reload there.
+func All(fetchNews ui.Refresher) []ui.Dashboard {
 	return []ui.Dashboard{
 		{Title: "Overview", Build: Overview},
 		{Title: "Positions", Build: Positions},
 		{Title: "History", Build: History},
+		{Title: "News", Build: News, Refresh: fetchNews},
 	}
 }

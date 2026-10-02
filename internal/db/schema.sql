@@ -196,3 +196,30 @@ CREATE TABLE IF NOT EXISTS eod_price (
     fetched_at   TEXT NOT NULL,
     PRIMARY KEY (symbol, session_date)
 );
+
+-- Articles from the finimpulse news endpoint, every field kept. An article
+-- is stored once however many held symbols it was found for.
+CREATE TABLE IF NOT EXISTS news_item (
+    id                    TEXT PRIMARY KEY,
+    type                  TEXT NOT NULL,
+    title                 TEXT NOT NULL,
+    description           TEXT NOT NULL,
+    pub_date              TEXT NOT NULL,
+    display_time          TEXT,
+    canonical_url         TEXT NOT NULL,
+    content_type          TEXT NOT NULL,
+    -- JSON array of tickers in the provider's notation.
+    related_tickers       TEXT NOT NULL,
+    provider_display_name TEXT NOT NULL,
+    provider_url          TEXT NOT NULL,
+    is_hosted             INTEGER NOT NULL,
+    is_premium_news       INTEGER NOT NULL,
+    fetched_at            TEXT NOT NULL
+);
+
+-- Which of our symbols each article was fetched for.
+CREATE TABLE IF NOT EXISTS news_symbol (
+    symbol  TEXT NOT NULL,
+    news_id TEXT NOT NULL REFERENCES news_item (id) ON DELETE CASCADE,
+    PRIMARY KEY (symbol, news_id)
+);

@@ -64,7 +64,7 @@ func render(component ui.Component, width, height int) string {
 
 func TestDashboardsRenderAtTheirSize(t *testing.T) {
 	report := testReport()
-	for _, dashboard := range All() {
+	for _, dashboard := range All(nil) {
 		for _, size := range [][2]int{{160, 50}, {80, 24}, {40, 10}} {
 			view := render(dashboard.Build(report), size[0], size[1])
 			if w := lipgloss.Width(view); w > size[0] {
@@ -376,5 +376,109 @@ func TestOverviewChartKeysWorkWithoutFocus(t *testing.T) {
 	}
 	if !strings.Contains(view, "XIRR over time") {
 		t.Errorf("m did not switch the return chart:\n%s", view)
+	}
+}
+
+func newsReport() *portfolio.Report {
+	report := testReport()
+	report.NewsSymbols = []string{"SNT.PL", "CDR.PL"}
+	report.News = []model.NewsItem{
+		{
+			ID: "a", Title: "Synektik wins tender", Description: "A long story about the tender.",
+			Published: time.Date(2026, 9, 30, 10, 15, 0, 0, time.UTC), Source: "PAP",
+			URL: "https://example.test/a", Symbols: []string{"SNT.PL"},
+			RelatedTickers: []string{"SNT.WA"},
+		},
+		{
+			ID: "b", Title: "CD Projekt delays a game", Published: time.Date(2026, 9, 29, 8, 0, 0, 0, time.UTC),
+			Source: "Reuters", URL: "https://example.test/b", Symbols: []string{"CDR.PL"},
+		},
+	}
+	return report
+}
+
+func TestNewsWithoutArticlesSaysHowToFetch(t *testing.T) {
+	report := testReport()
+	report.NewsSymbols = []string{"SNT.PL"}
+
+	if view := render(News(report), 120, 10); !strings.Contains(view, "Press r to fetch") ||
+		!strings.Contains(view, "SNT.PL") {
+		t.Errorf("empty news does not explain itself:\n%s", view)
+	}
+}
+
+func TestNewsListsArticlesAndOpensThemInAPager(t *testing.T) {
+	report := newsReport()
+	table := NewsTable(report)
+	table.SetSize(160, 12)
+	table.SetFocused(true)
+
+	view := table.View()
+	for _, want := range []string{"Synektik wins tender", "PAP", "2026-09-30 10:15", "Reuters"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("news table is missing %q:\n%s", want, view)
+		}
+	}
+
+	push := table.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))().(ui.PushMsg)
+	article, ok := push.Build(report)
+	if !ok {
+		t.Fatal("article could not be built")
+	}
+	styled := render(article, 60, 20)
+	if !strings.Contains(styled, "\x1b]8;;https://example.test/a") {
+		t.Errorf("article link is not a terminal hyperlink:\n%q", styled)
+	}
+	text := regexp.MustCompile(`\x1b\[[0-9;:]*[a-zA-Z]|\x1b\]8;[^\a]*\a`).ReplaceAllString(styled, "")
+	for _, want := range []string{"Synektik wins tender", "PAP · 2026-09-30 10:15 UTC", "A long story",
+		"open article ↗ https://example.test/a", "mentions SNT.WA", "esc back"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("article is missing %q:\n%s", want, text)
+		}
+	}
+
+	report.News = report.News[1:]
+	if _, ok := push.Build(report); ok {
+		t.Error("article kept open once it is no longer listed")
+	}
+}
+
+// copied runs a command and reports the notice it shows, if any.
+func copied(t *testing.T, cmd tea.Cmd) string {
+	t.Helper()
+
+	if cmd == nil {
+		t.Fatal("y returned no command")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("y produced %T, want the clipboard write and a notice", cmd())
+	}
+	for _, c := range batch {
+		if notice, ok := c().(ui.NoticeMsg); ok {
+			return string(notice)
+		}
+	}
+	return ""
+}
+
+func TestNewsCopiesLinkFromTableAndArticle(t *testing.T) {
+	report := newsReport()
+	table := NewsTable(report)
+	table.SetSize(160, 12)
+	table.SetFocused(true)
+	y := tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})
+
+	if got := copied(t, table.Update(y)); got != copiedNote {
+		t.Errorf("table notice = %q, want %q", got, copiedNote)
+	}
+
+	article := NewsArticle(report.News[0])
+	article.SetSize(80, 20)
+	if got := copied(t, article.Update(y)); got != copiedNote {
+		t.Errorf("article notice = %q, want %q", got, copiedNote)
+	}
+	if view := article.View(); !strings.Contains(view, "y copy link") {
+		t.Errorf("article footer does not hint at y:\n%s", view)
 	}
 }

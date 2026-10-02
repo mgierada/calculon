@@ -316,3 +316,19 @@ func validateTrade(id, symbol string, side Side, volume float64, openTime time.T
 func formatFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
+
+// NewsItem is a stored article, with the held symbols it was found for.
+type NewsItem struct {
+	ID          string
+	Title       string
+	Description string
+	Published   time.Time
+	URL         string
+	Source      string
+	Premium     bool
+	// RelatedTickers are every ticker the article mentions, in the news
+	// provider's notation.
+	RelatedTickers []string
+	// Symbols are our symbols the article was fetched for, sorted.
+	Symbols []string
+}

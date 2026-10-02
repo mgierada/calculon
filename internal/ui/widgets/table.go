@@ -74,6 +74,8 @@ type Table struct {
 	columns  []Column
 	rows     []Row
 	onSelect func(Row) tea.Cmd
+	// rowKeys are actions on the highlighted row by key; see OnRowKey.
+	rowKeys  map[string]func(Row) tea.Cmd
 	width    int
 	height   int
 	focused  bool
@@ -121,6 +123,16 @@ func (t *Table) SetRows(rows []Row) {
 	t.applySort()
 }
 
+// OnRowKey makes key call handle with the highlighted row, e.g. to copy a
+// link it carries.
+func (t *Table) OnRowKey(key string, handle func(Row) tea.Cmd) *Table {
+	if t.rowKeys == nil {
+		t.rowKeys = map[string]func(Row) tea.Cmd{}
+	}
+	t.rowKeys[key] = handle
+	return t
+}
+
 // Init implements ui.Component.
 func (t *Table) Init() tea.Cmd {
 	return t.table.Init()
@@ -130,6 +142,14 @@ func (t *Table) Init() tea.Cmd {
 func (t *Table) Update(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok && t.handleSortKey(key.String()) {
 		return nil
+	}
+	if key, ok := msg.(tea.KeyPressMsg); ok && !t.CapturingInput() {
+		if handle, ok := t.rowKeys[key.String()]; ok {
+			if row, ok := t.highlighted(); ok {
+				return handle(row)
+			}
+			return nil
+		}
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == selectKey &&
 		t.onSelect != nil && !t.CapturingInput() {

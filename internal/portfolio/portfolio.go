@@ -31,9 +31,18 @@ type Options struct {
 	FX FX
 	// Prices overrides the stored quotes as the source of latest prices.
 	Prices PriceSource
+	// News says which stored articles the report carries.
+	News NewsOptions
 	// Now is when the report is viewed, which decides whether a day change
 	// is today's or left over from an earlier session. Zero skips the check.
 	Now time.Time
+}
+
+// NewsOptions picks the news shown: up to PerSymbol articles about each of the
+// Positions most valuable symbols. Zero Positions shows none.
+type NewsOptions struct {
+	Positions int
+	PerSymbol int
 }
 
 // Delta is a change that may not be computable yet, e.g. day-to-date change
@@ -131,8 +140,12 @@ type Report struct {
 	// AccountReturns holds each account's own returns next to the combined
 	// ones, set on the summary of several accounts.
 	AccountReturns []AccountReturn
-	Closed         []model.Owned[model.Position]
-	CashOps        []model.Owned[model.CashOp]
+	// NewsSymbols are the symbols news is shown for, biggest holding first,
+	// and News the stored articles about them, newest first.
+	NewsSymbols []string
+	News        []model.NewsItem
+	Closed      []model.Owned[model.Position]
+	CashOps     []model.Owned[model.CashOp]
 	// Warnings are data problems worth surfacing, e.g. a missing FX rate.
 	Warnings []string
 }

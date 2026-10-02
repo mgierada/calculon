@@ -55,6 +55,15 @@ type HeightFitter interface {
 	HeightFor(width int) int
 }
 
+// NoticeMsg shows a short message in the footer for noticeDuration.
+type NoticeMsg string
+
+// Notice returns a command that shows text in the footer for a moment, e.g.
+// to confirm a copy.
+func Notice(text string) tea.Cmd {
+	return func() tea.Msg { return NoticeMsg(text) }
+}
+
 // Stateful is implemented by components holding view state worth keeping when
 // a reload rebuilds them, like a table's sort and cursor. Restore receives what
 // State returned on the component being replaced, and ignores state it does

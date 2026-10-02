@@ -2,6 +2,7 @@ package portfolio
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -355,5 +356,24 @@ func TestScopeUnknownAccount(t *testing.T) {
 	missing := model.AccountKey{Provider: model.ProviderXTB, ID: "nope"}
 	if _, _, ok := Scope(testInput(), Options{FX: fx}, missing); ok {
 		t.Error("Scope found an account the user does not have")
+	}
+}
+
+func TestTopSymbolsAddsUpAccounts(t *testing.T) {
+	holdings := []Holding{
+		{Instrument: model.Instrument{Symbol: "A.US"}, ValueBase: 300},
+		{Instrument: model.Instrument{Symbol: "B.PL"}, ValueBase: 200},
+		{Instrument: model.Instrument{Symbol: "B.PL"}, ValueBase: 200},
+		{Instrument: model.Instrument{Symbol: "C.PL"}, ValueBase: 100},
+	}
+
+	if got := TopSymbols(holdings, 2); !slices.Equal(got, []string{"B.PL", "A.US"}) {
+		t.Errorf("TopSymbols = %v, want B.PL first for its two accounts together", got)
+	}
+	if got := TopSymbols(holdings, 10); len(got) != 3 {
+		t.Errorf("TopSymbols = %v, want every symbol once", got)
+	}
+	if got := TopSymbols(holdings, 0); got != nil {
+		t.Errorf("TopSymbols(0) = %v, want none", got)
 	}
 }

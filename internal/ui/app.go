@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -140,6 +141,10 @@ type App struct {
 	// staleView marks new prices held back while a component takes text, so
 	// the rebuild does not drop what is being typed.
 	staleView bool
+	// refresh is a dashboard's running refresh, nil when none runs; notice
+	// is what the last one left for the footer.
+	refresh *refreshing
+	notice  string
 }
 
 // modal is a picker drawn over the screen, taking every key while open.
@@ -173,6 +178,9 @@ func (a *App) Init() tea.Cmd {
 
 // Update handles app-level messages and keys, then forwards the rest.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if cmd, ok := a.handleRefresh(msg); ok {
+		return a, cmd
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		// A terminal that cannot report its size sends zeros; keeping the
@@ -198,6 +206,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handlePrices(msg)
 	case PushMsg:
 		return a, a.push(msg)
+	case NoticeMsg:
+		return a, a.showNotice(string(msg))
+	case noticeExpiredMsg:
+		if a.notice == string(msg) {
+			a.notice = ""
+		}
+		return a, nil
 	case tea.KeyPressMsg:
 		return a, a.handleKey(msg)
 	}
@@ -217,7 +232,10 @@ func (a *App) View() tea.View {
 		return view
 	}
 	body := a.body()
-	if a.modal != nil {
+	switch {
+	case a.refresh != nil:
+		body = overlay(body, a.refresh.view())
+	case a.modal != nil:
 		body = overlay(body, a.modal.picker.View())
 	}
 	view := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, a.header(), body, a.footer()))
@@ -278,12 +296,23 @@ func (a *App) handleReport(msg reportMsg) tea.Cmd {
 func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	if key == keyForceQuit {
+		a.cancelRefresh()
 		return tea.Quit
 	}
 	if a.splash != nil {
 		// Only quitting is possible before the dashboards are up.
 		if key == keyQuit {
 			return tea.Quit
+		}
+		return nil
+	}
+	if a.refresh != nil {
+		switch key {
+		case keyQuit:
+			a.cancelRefresh()
+			return tea.Quit
+		case keyBack:
+			a.cancelRefresh()
 		}
 		return nil
 	}
@@ -313,6 +342,9 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case keyReload:
+		if a.active < len(a.dashboards) && a.dashboards[a.active].Refresh != nil && a.report != nil {
+			return a.startRefresh(a.dashboards[a.active])
+		}
 		return a.reload(true)
 	case keyTabPrev, keyTabNext:
 		step := 1
@@ -551,6 +583,9 @@ func (a *App) footer() string {
 	if pricesInfo != "" {
 		info = append(info, pricesInfo)
 	}
+	if a.notice != "" {
+		info = append(info, a.notice)
+	}
 	info = append(info, a.report.FXNote)
 	left := footerStyle.Render(" " + strings.Join(info, " · "))
 	warnings := a.report.Warnings
@@ -582,4 +617,16 @@ func fill(left, right string, width int) string {
 		gap = 0
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// noticeDuration is how long a notice stays in the footer.
+const noticeDuration = 4 * time.Second
+
+// noticeExpiredMsg clears a notice unless another replaced it meanwhile.
+type noticeExpiredMsg string
+
+// showNotice puts text in the footer and clears it after noticeDuration.
+func (a *App) showNotice(text string) tea.Cmd {
+	a.notice = text
+	return tea.Tick(noticeDuration, func(time.Time) tea.Msg { return noticeExpiredMsg(text) })
 }

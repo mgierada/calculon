@@ -44,6 +44,13 @@ var bindingGroups = []struct {
 		{"esc (filter)", "clear filter"},
 		{"shift+→ / shift+←", "scroll columns"},
 	}},
+	{"News", []binding{
+		{"r", "fetch the latest news of the top holdings"},
+		{"esc (fetching)", "cancel the fetch"},
+		{"enter", "read the article"},
+		{"y", "copy the article's link to the clipboard"},
+		{"j / k, f / b, d / u", "scroll the article"},
+	}},
 	{"Overview", []binding{
 		{"g", "allocation: change grouping"},
 		{"m", "returns: cycle TWR / XIRR / CAGR"},

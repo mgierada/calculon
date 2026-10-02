@@ -35,7 +35,7 @@ func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Re
 	if scope == nil {
 		report := Build(in, opts)
 		report.AccountReturns = AccountReturns(in, opts)
-		return report, nil
+		return withNews(conn, report, opts.News)
 	}
 
 	all := in.Accounts
@@ -47,5 +47,13 @@ func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Re
 	report.Scope = &scoped.Accounts[0].Account
 	report.Available = all
 	report.FXNote = "values in " + report.Base + ", the account's currency"
-	return report, nil
+	return withNews(conn, report, opts.News)
+}
+
+// withNews attaches the stored news about the report's biggest holdings.
+func withNews(conn *sql.DB, report Report, news NewsOptions) (Report, error) {
+	report.NewsSymbols = TopSymbols(report.Holdings, news.Positions)
+	var err error
+	report.News, err = db.News(conn, report.NewsSymbols, news.PerSymbol)
+	return report, err
 }
