@@ -1,0 +1,58 @@
+POST {{host}}/v1/analysis/recommendations
+Content-Type: Application/json
+Accept: Application/json
+Authorization: Bearer {{token}}
+
+{
+  "symbol": "XTB.WA",
+  "start_date": "2026-01-01",
+  "end_date": "2026-10-01",
+  "limit": 3,
+  "offset": 0,
+}
+
+
+// {
+//   "task_id": "10041839-3863-0032-0000-f0447a340304",
+//   "status_code": 20000,
+//   "status_message": "OK",
+//   "live": true,
+//   "cost": 0.00125,
+//   "data": {
+//     "symbol": "XTB.WA",
+//     "limit": 3,
+//     "offset": 0,
+//     "start_date": "2026-01-01",
+//     "end_date": "2026-10-01"
+//   },
+//   "result": {
+//     "total_count": 9,
+//     "items_count": 3,
+//     "items": [
+//       {
+//         "date": "2026-09-01",
+//         "strong_buy": 0,
+//         "buy": 3,
+//         "hold": 1,
+//         "sell": 0,
+//         "strong_sell": 0
+//       },
+//       {
+//         "date": "2026-08-01",
+//         "strong_buy": 0,
+//         "buy": 3,
+//         "hold": 1,
+//         "sell": 0,
+//         "strong_sell": 0
+//       },
+//       {
+//         "date": "2026-07-01",
+//         "strong_buy": 0,
+//         "buy": 3,
+//         "hold": 1,
+//         "sell": 0,
+//         "strong_sell": 0
+//       }
+//     ]
+//   }
+// }

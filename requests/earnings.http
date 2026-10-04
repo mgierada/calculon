@@ -1,0 +1,98 @@
+POST {{host}}/v1/analysis/earnings
+Content-Type: Application/json
+Accept: Application/json
+Authorization: Bearer {{token}}
+
+{
+  "symbol": "XTB.WA",
+  "types": [
+          "eps_actual",
+          "earnings_revenue"
+      ],
+      "methodologies": [
+          "normalized",
+          "gaap"
+      ],
+  "start_date": "2026-01-01",
+  "end_date": "2026-10-01",
+  "limit": 3,
+  "offset": 0,
+}
+
+// {
+//   "task_id": "10041821-3863-0031-0000-fb91241019a9",
+//   "status_code": 20000,
+//   "status_message": "OK",
+//   "live": true,
+//   "cost": 0.00155,
+//   "data": {
+//     "symbol": "XTB.WA",
+//     "limit": 3,
+//     "offset": 0,
+//     "start_date": "2026-01-01",
+//     "end_date": "2026-10-01",
+//     "types": [
+//       "eps_actual",
+//       "earnings_revenue"
+//     ],
+//     "methodologies": [
+//       "normalized",
+//       "gaap"
+//     ]
+//   },
+//   "result": {
+//     "symbol": "XTB.WA",
+//     "target_price": 148.5,
+//     "target_average_price": 163.18736,
+//     "target_low_price": 155,
+//     "target_high_price": 178.74944,
+//     "total_count": 6,
+//     "items_count": 5,
+//     "items": [
+//       {
+//         "type": "eps_actual",
+//         "date": "2026-04-01",
+//         "date_type": "quarter",
+//         "methodology": "gaap",
+//         "actual": 4.19,
+//         "estimate": 2.6543,
+//         "surprise": 1.5357,
+//         "surprise_pct": 57.86
+//       },
+//       {
+//         "type": "earnings_revenue",
+//         "date": "2026-04-01",
+//         "date_type": "quarter",
+//         "methodology": "gaap",
+//         "revenue": 992558000,
+//         "earnings": 492198000
+//       },
+//       {
+//         "type": "eps_actual",
+//         "date": "2026-04-01",
+//         "date_type": "quarter",
+//         "methodology": "normalized",
+//         "actual": 4.19,
+//         "estimate": 2.6543,
+//         "surprise": 1.5357,
+//         "surprise_pct": 57.86
+//       },
+//       {
+//         "type": "earnings_revenue",
+//         "date": "2026-04-01",
+//         "date_type": "quarter",
+//         "methodology": "normalized",
+//         "revenue": 992558000,
+//         "earnings": 492198000
+//       },
+//       {
+//         "type": "earnings_revenue",
+//         "date": "2026-01-01",
+//         "date_type": "quarter",
+//         "methodology": "gaap",
+//         "revenue": 1094018000,
+//         "earnings": 535042000
+//       }
+//     ]
+//   }
+// }
