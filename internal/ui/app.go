@@ -208,6 +208,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.push(msg)
 	case NoticeMsg:
 		return a, a.showNotice(string(msg))
+	case PopMsg:
+		if n := len(a.stack); n > 0 {
+			a.stack = a.stack[:n-1]
+		}
+		return a, nil
+	case RefreshRequestMsg:
+		return a, a.refreshActive()
 	case noticeExpiredMsg:
 		if a.notice == string(msg) {
 			a.notice = ""
@@ -342,8 +349,8 @@ func (a *App) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	case keyReload:
-		if a.active < len(a.dashboards) && a.dashboards[a.active].Refresh != nil && a.report != nil {
-			return a.startRefresh(a.dashboards[a.active])
+		if cmd := a.refreshActive(); cmd != nil {
+			return cmd
 		}
 		return a.reload(true)
 	case keyTabPrev, keyTabNext:

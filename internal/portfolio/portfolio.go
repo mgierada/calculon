@@ -33,6 +33,8 @@ type Options struct {
 	Prices PriceSource
 	// News says which stored articles the report carries.
 	News NewsOptions
+	// EarningsMethodology is the methodology stored earnings are read in.
+	EarningsMethodology string
 	// Now is when the report is viewed, which decides whether a day change
 	// is today's or left over from an earlier session. Zero skips the check.
 	Now time.Time
@@ -144,8 +146,11 @@ type Report struct {
 	// and News the stored articles about them, newest first.
 	NewsSymbols []string
 	News        []model.NewsItem
-	Closed      []model.Owned[model.Position]
-	CashOps     []model.Owned[model.CashOp]
+	// Earnings holds the stored earnings of every holding fetched before, by
+	// symbol.
+	Earnings map[string]model.Earnings
+	Closed   []model.Owned[model.Position]
+	CashOps  []model.Owned[model.CashOp]
 	// Warnings are data problems worth surfacing, e.g. a missing FX rate.
 	Warnings []string
 }

@@ -51,6 +51,11 @@ var bindingGroups = []struct {
 		{"y", "copy the article's link to the clipboard"},
 		{"j / k, f / b, d / u", "scroll the article"},
 	}},
+	{"Earnings", []binding{
+		{"p", "pick a stock you hold"},
+		{"r", "fetch the shown stock's earnings again"},
+		{"← / →", "scroll the reporting periods"},
+	}},
 	{"Overview", []binding{
 		{"g", "allocation: change grouping"},
 		{"m", "returns: cycle TWR / XIRR / CAGR"},

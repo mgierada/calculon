@@ -223,3 +223,55 @@ CREATE TABLE IF NOT EXISTS news_symbol (
     news_id TEXT NOT NULL REFERENCES news_item (id) ON DELETE CASCADE,
     PRIMARY KEY (symbol, news_id)
 );
+
+-- Analysts' price targets, one row per earnings fetch so their history is
+-- kept; symbol is ours.
+CREATE TABLE IF NOT EXISTS earnings_target (
+    id                   INTEGER PRIMARY KEY,
+    symbol               TEXT NOT NULL,
+    fetched_at           TEXT NOT NULL,
+    target_price         REAL,
+    target_average_price REAL,
+    target_low_price     REAL,
+    target_high_price    REAL,
+    total_count          INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_target_symbol ON earnings_target (symbol, fetched_at);
+
+-- Earnings items, one row per period, overwritten when a fetch reports a
+-- period again so revised figures win. date is the period's first day.
+CREATE TABLE IF NOT EXISTS earnings_growth (
+    symbol           TEXT NOT NULL,
+    date             TEXT NOT NULL,
+    date_type        TEXT NOT NULL,
+    growth           REAL,
+    growth_benchmark REAL,
+    symbol_benchmark TEXT NOT NULL,
+    fetched_at       TEXT NOT NULL,
+    PRIMARY KEY (symbol, date, date_type)
+);
+
+CREATE TABLE IF NOT EXISTS earnings_eps (
+    symbol       TEXT NOT NULL,
+    date         TEXT NOT NULL,
+    date_type    TEXT NOT NULL,
+    methodology  TEXT NOT NULL,
+    actual       REAL,
+    estimate     REAL,
+    surprise     REAL,
+    surprise_pct REAL,
+    fetched_at   TEXT NOT NULL,
+    PRIMARY KEY (symbol, date, date_type, methodology)
+);
+
+CREATE TABLE IF NOT EXISTS earnings_revenue (
+    symbol      TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    date_type   TEXT NOT NULL,
+    methodology TEXT NOT NULL,
+    revenue     REAL,
+    earnings    REAL,
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (symbol, date, date_type, methodology)
+);

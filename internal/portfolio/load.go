@@ -35,7 +35,7 @@ func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Re
 	if scope == nil {
 		report := Build(in, opts)
 		report.AccountReturns = AccountReturns(in, opts)
-		return withNews(conn, report, opts.News)
+		return withNews(conn, report, opts)
 	}
 
 	all := in.Accounts
@@ -47,13 +47,26 @@ func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Re
 	report.Scope = &scoped.Accounts[0].Account
 	report.Available = all
 	report.FXNote = "values in " + report.Base + ", the account's currency"
-	return withNews(conn, report, opts.News)
+	return withNews(conn, report, scopedOpts)
 }
 
-// withNews attaches the stored news about the report's biggest holdings.
-func withNews(conn *sql.DB, report Report, news NewsOptions) (Report, error) {
-	report.NewsSymbols = TopSymbols(report.Holdings, news.Positions)
+// withNews attaches the stored news about the report's biggest holdings, and
+// the stored earnings of every holding.
+func withNews(conn *sql.DB, report Report, opts Options) (Report, error) {
+	report.NewsSymbols = TopSymbols(report.Holdings, opts.News.Positions)
 	var err error
-	report.News, err = db.News(conn, report.NewsSymbols, news.PerSymbol)
-	return report, err
+	if report.News, err = db.News(conn, report.NewsSymbols, opts.News.PerSymbol); err != nil {
+		return report, err
+	}
+	report.Earnings = map[string]model.Earnings{}
+	for _, symbol := range TopSymbols(report.Holdings, len(report.Holdings)) {
+		earnings, ok, err := db.EarningsOf(conn, symbol, opts.EarningsMethodology)
+		if err != nil {
+			return report, err
+		}
+		if ok {
+			report.Earnings[symbol] = earnings
+		}
+	}
+	return report, nil
 }

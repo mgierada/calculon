@@ -50,7 +50,8 @@ func TestLoadWithoutEnvFileAppliesDefaults(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 	if cfg.DBConfig.DBPath != "./calculon.db" || cfg.CalculonConfig.SSHAddr != ":2222" ||
-		cfg.CalculonConfig.BaseCurrency != "PLN" || cfg.FinimpulseConfig.PollInterval != 15*time.Minute {
+		cfg.CalculonConfig.BaseCurrency != "PLN" || cfg.FinimpulseConfig.PollInterval != 15*time.Minute ||
+		len(cfg.FinimpulseConfig.EarningsTypes) != 3 || cfg.FinimpulseConfig.EarningsMethodology != "gaap" {
 		t.Errorf("cfg = %+v", cfg)
 	}
 }

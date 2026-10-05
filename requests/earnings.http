@@ -8,10 +8,7 @@ Authorization: Bearer {{token}}
   "types": [
           "eps_actual",
           "earnings_revenue"
-      ],
-      "methodologies": [
-          "normalized",
-          "gaap"
+          "growth"
       ],
   "start_date": "2026-01-01",
   "end_date": "2026-10-01",

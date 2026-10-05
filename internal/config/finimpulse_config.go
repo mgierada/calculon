@@ -15,4 +15,11 @@ type FinimpulseConfig struct {
 	// NewsLookback is how far back news is searched for a symbol without any
 	// stored; later fetches start from the newest stored article.
 	NewsLookback time.Duration `env:"FINIMPULSE_NEWS_LOOKBACK" env-default:"720h"`
+	// Earnings requests ask for these item types in this methodology (empty
+	// for all), EarningsPage items a page. EarningsLookback is how far back
+	// the dashboard's r reaches; a backfill sets its own start.
+	EarningsTypes       []string      `env:"FINIMPULSE_EARNINGS_TYPES" env-default:"eps_actual,earnings_revenue,growth" env-separator:","`
+	EarningsMethodology string        `env:"FINIMPULSE_EARNINGS_METHODOLOGY" env-default:"gaap"`
+	EarningsLookback    time.Duration `env:"FINIMPULSE_EARNINGS_LOOKBACK" env-default:"17520h"`
+	EarningsPage        int           `env:"FINIMPULSE_EARNINGS_PAGE" env-default:"50"`
 }

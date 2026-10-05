@@ -6,7 +6,6 @@ package news
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	"github.com/mgierada/calculon/internal/db"
@@ -80,7 +79,7 @@ func (f *Fetcher) Fetch(ctx context.Context, symbols []string, progress func(Ste
 // fetchSymbol stores the articles about symbol published since the newest
 // one stored, or within the lookback when none is.
 func (f *Fetcher) fetchSymbol(ctx context.Context, symbol string) (int, error) {
-	providerSymbol, err := f.providerSymbol(symbol)
+	providerSymbol, err := symbolmap.Lookup(f.conn, symbol)
 	if err != nil {
 		return 0, err
 	}
@@ -101,17 +100,4 @@ func (f *Fetcher) fetchSymbol(ctx context.Context, symbol string) (int, error) {
 		return 0, err
 	}
 	return db.StoreNews(f.conn, symbol, now, resp.Result.Items)
-}
-
-// providerSymbol names symbol the way finimpulse does: the stored mapping, so
-// a hand fix applies, or the suffix rules for a symbol not polled yet.
-func (f *Fetcher) providerSymbol(symbol string) (string, error) {
-	stored, ok, err := db.ProviderSymbol(f.conn, symbol, symbolmap.Finimpulse)
-	if err != nil || ok {
-		return stored, err
-	}
-	if mapped, ok := symbolmap.ToFinimpulse(symbol); ok {
-		return mapped, nil
-	}
-	return "", fmt.Errorf("no finimpulse symbol for %s", symbol)
 }

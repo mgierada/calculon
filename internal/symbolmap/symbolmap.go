@@ -4,6 +4,7 @@ package symbolmap
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"github.com/mgierada/calculon/internal/db"
@@ -71,4 +72,17 @@ func Sync(conn *sql.DB) ([]string, error) {
 		}
 	}
 	return unmapped, db.StoreSymbolMappings(conn, Finimpulse, mapped)
+}
+
+// Lookup names symbol the way finimpulse does: the stored mapping, so a hand
+// fix applies, or the suffix rules for a symbol not mapped yet.
+func Lookup(conn *sql.DB, symbol string) (string, error) {
+	stored, ok, err := db.ProviderSymbol(conn, symbol, Finimpulse)
+	if err != nil || ok {
+		return stored, err
+	}
+	if mapped, ok := ToFinimpulse(symbol); ok {
+		return mapped, nil
+	}
+	return "", fmt.Errorf("no finimpulse symbol for %s", symbol)
 }

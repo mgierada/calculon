@@ -51,7 +51,7 @@ func drain(t *testing.T, app *App) {
 
 func TestRefreshRunsOnlyOnItsTab(t *testing.T) {
 	calls := 0
-	app, loads := refreshApp(t, func(context.Context, *portfolio.Report, func(Progress)) (string, error) {
+	app, loads := refreshApp(t, func(context.Context, *portfolio.Report, string, func(Progress)) (string, error) {
 		calls++
 		return "", nil
 	})
@@ -74,7 +74,7 @@ func TestRefreshRunsOnlyOnItsTab(t *testing.T) {
 
 func TestRefreshShowsProgressThenNotice(t *testing.T) {
 	step := make(chan struct{})
-	app, _ := refreshApp(t, func(_ context.Context, _ *portfolio.Report, progress func(Progress)) (string, error) {
+	app, _ := refreshApp(t, func(_ context.Context, _ *portfolio.Report, _ string, progress func(Progress)) (string, error) {
 		progress(Progress{Done: 0, Total: 2, Current: "XTB.PL"})
 		progress(Progress{Done: 1, Total: 2, Finished: "XTB.PL", Detail: "3 new"})
 		<-step
@@ -100,7 +100,7 @@ func TestRefreshShowsProgressThenNotice(t *testing.T) {
 }
 
 func TestRefreshCancelsOnEsc(t *testing.T) {
-	app, _ := refreshApp(t, func(ctx context.Context, _ *portfolio.Report, _ func(Progress)) (string, error) {
+	app, _ := refreshApp(t, func(ctx context.Context, _ *portfolio.Report, _ string, _ func(Progress)) (string, error) {
 		<-ctx.Done()
 		return "", ctx.Err()
 	})

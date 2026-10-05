@@ -332,3 +332,51 @@ type NewsItem struct {
 	// Symbols are our symbols the article was fetched for, sorted.
 	Symbols []string
 }
+
+// Earnings is a symbol's stored earnings history, oldest period first, with
+// the analysts' latest price targets.
+type Earnings struct {
+	Symbol string
+	// Currency is the one the symbol's market price is quoted in, empty when
+	// it has not been priced.
+	Currency   string
+	FetchedAt  time.Time
+	Target     PriceTarget
+	TotalCount int
+	Revenue    []EarningsRevenue
+	EPS        []EarningsEPS
+	Growth     []EarningsGrowth
+}
+
+// PriceTarget is the analysts' view of a price: Price is what the source
+// reports as the target price, Low, Average and High the spread of analyst
+// targets. Each is nil when unknown.
+type PriceTarget struct {
+	Price, Average, Low, High *float64
+}
+
+// EarningsPeriod is a reporting period: its first day and its length, e.g.
+// quarter.
+type EarningsPeriod struct {
+	Start  time.Time
+	Length string
+}
+
+// EarningsRevenue is a period's revenue and net earnings.
+type EarningsRevenue struct {
+	EarningsPeriod
+	Revenue, Earnings *float64
+}
+
+// EarningsEPS is a period's earnings per share against the estimate.
+type EarningsEPS struct {
+	EarningsPeriod
+	Actual, Estimate, Surprise, SurprisePct *float64
+}
+
+// EarningsGrowth is a period's revenue growth next to a benchmark index's.
+type EarningsGrowth struct {
+	EarningsPeriod
+	Growth, Benchmark *float64
+	BenchmarkSymbol   string
+}

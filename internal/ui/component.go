@@ -55,6 +55,23 @@ type HeightFitter interface {
 	HeightFor(width int) int
 }
 
+// PopMsg closes the drill-down on top, e.g. a picker once something is picked.
+type PopMsg struct{}
+
+// Pop returns a command that closes the drill-down on top.
+func Pop() tea.Cmd {
+	return func() tea.Msg { return PopMsg{} }
+}
+
+// RefreshRequestMsg asks the app to refresh the active dashboard, as r does.
+type RefreshRequestMsg struct{}
+
+// RequestRefresh returns a command that refreshes the active dashboard, e.g.
+// once a component's choice has no stored data yet.
+func RequestRefresh() tea.Cmd {
+	return func() tea.Msg { return RefreshRequestMsg{} }
+}
+
 // NoticeMsg shows a short message in the footer for noticeDuration.
 type NoticeMsg string
 

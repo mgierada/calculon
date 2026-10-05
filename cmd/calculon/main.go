@@ -12,11 +12,13 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mgierada/calculon/internal/auth"
 	"github.com/mgierada/calculon/internal/config"
 	"github.com/mgierada/calculon/internal/data_processing/parsers"
 	"github.com/mgierada/calculon/internal/db"
+	"github.com/mgierada/calculon/internal/earnings"
 	"github.com/mgierada/calculon/internal/finimpulse"
 	"github.com/mgierada/calculon/internal/marketdata"
 	"github.com/mgierada/calculon/internal/model"
@@ -41,6 +43,9 @@ usage:
   calculon user list                                list users
   calculon account list [--user NAME]               list a user's accounts
   calculon account rename [--user NAME] ID NAME     label an account, e.g. IKE
+  calculon earnings backfill --from DATE [--to DATE] (--all | --symbol S...)
+                                                    fetch earnings history of
+                                                    held symbols, e.g. --from 2016-01-01
 
 --user defaults to CALCULON_USER, or to the only user when there is just one.
 `
@@ -66,6 +71,8 @@ func main() {
 		err = runUser(args)
 	case "account":
 		err = runAccount(args)
+	case "earnings":
+		err = runEarnings(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -108,7 +115,7 @@ func runUI(args []string) error {
 	go poller.Run(ctx)
 
 	splash := ui.Splash{User: user.Name, MinDuration: ui.DefaultSplashDuration}
-	app := ui.NewApp(dashboards.All(newsRefresher(env)), load)
+	app := ui.NewApp(dashboards.All(refreshers(env)), load)
 	return ui.Run(app.WithSplash(splash).WithPrices(updates))
 }
 
@@ -130,10 +137,35 @@ func runServe() error {
 		Addr:        env.cfg.CalculonConfig.SSHAddr,
 		HostKeyPath: env.cfg.CalculonConfig.SSHHostKey,
 		Conn:        env.conn,
-		Dashboards:  dashboards.All(newsRefresher(env)),
+		Dashboards:  dashboards.All(refreshers(env)),
 		Report:      env.report,
 		Prices:      poller,
 	})
+}
+
+// refreshers fetch what the API-backed dashboards show when r is pressed.
+func refreshers(e env) dashboards.Refreshers {
+	return dashboards.Refreshers{News: newsRefresher(e), Earnings: earningsRefresher(e)}
+}
+
+// earningsRefresher fetches the shown stock's earnings over the configured
+// lookback, page by page.
+func earningsRefresher(e env) ui.Refresher {
+	fetcher := newEarningsFetcher(e)
+	return func(ctx context.Context, _ *portfolio.Report, symbol string,
+		progress func(ui.Progress)) (string, error) {
+		if symbol == "" {
+			return "", errors.New("pick a stock with p first")
+		}
+		progress(ui.Progress{Total: 1, Current: symbol})
+		result, err := fetcher.FetchRecent(ctx, symbol, func(p earnings.Page) {
+			progress(ui.Progress{Done: p.Items, Total: max(p.Total, p.Items), Current: symbol})
+		})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("earnings: %s, %d items", symbol, result.Items), nil
+	}
 }
 
 // newsRefresher fetches news about the report's top holdings from finimpulse,
@@ -142,7 +174,8 @@ func newsRefresher(e env) ui.Refresher {
 	cfg := e.cfg.FinimpulseConfig
 	fetcher := news.NewFetcher(e.conn, finimpulse.New(cfg.BaseURL, cfg.Token),
 		cfg.NewsPerSymbol, cfg.NewsLookback)
-	return func(ctx context.Context, report *portfolio.Report, progress func(ui.Progress)) (string, error) {
+	return func(ctx context.Context, report *portfolio.Report, _ string,
+		progress func(ui.Progress)) (string, error) {
 		result, err := fetcher.Fetch(ctx, report.NewsSymbols, func(step news.Step) {
 			progress(newsProgress(step))
 		})
@@ -411,6 +444,7 @@ func openEnv() (env, error) {
 				Positions: cfg.FinimpulseConfig.NewsPositions,
 				PerSymbol: cfg.FinimpulseConfig.NewsPerSymbol,
 			},
+			EarningsMethodology: cfg.FinimpulseConfig.EarningsMethodology,
 		},
 	}, nil
 }
@@ -453,4 +487,94 @@ func parseInterspersed(flags *flag.FlagSet, args []string) ([]string, error) {
 		positional = append(positional, flags.Arg(0))
 		args = flags.Args()[1:]
 	}
+}
+
+// runEarnings backfills earnings history from the API.
+func runEarnings(args []string) error {
+	if len(args) == 0 || args[0] != "backfill" {
+		return fmt.Errorf("earnings needs a subcommand: backfill\n\n%s", usage)
+	}
+	flags := flag.NewFlagSet("earnings backfill", flag.ContinueOnError)
+	from := flags.String("from", "", "first period to fetch, YYYY-MM-DD")
+	to := flags.String("to", time.Now().Format(time.DateOnly), "last period to fetch, YYYY-MM-DD")
+	all := flags.Bool("all", false, "every held symbol")
+	var symbols symbolList
+	flags.Var(&symbols, "symbol", "symbol to fetch, e.g. EQIX.US; repeatable")
+	if _, err := parseInterspersed(flags, args[1:]); err != nil {
+		return err
+	}
+	start, end, err := backfillRange(*from, *to)
+	if err != nil {
+		return err
+	}
+	if *all == (len(symbols) > 0) {
+		return errors.New("earnings backfill needs either --all or --symbol")
+	}
+
+	env, err := openEnv()
+	if err != nil {
+		return err
+	}
+	defer env.conn.Close()
+	if *all {
+		if symbols, err = db.HeldSymbols(env.conn); err != nil {
+			return err
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fetcher := newEarningsFetcher(env)
+	for _, symbol := range symbols {
+		result, err := fetcher.Fetch(ctx, symbol, start, end, func(p earnings.Page) {
+			log.Printf("%s  page %d: %d of %d items", symbol, p.Number, p.Items, p.Total)
+		})
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			log.Printf("%s  failed: %v", symbol, err)
+			continue
+		}
+		log.Printf("%s  stored %d items in %d pages", symbol, result.Items, result.Pages)
+	}
+	return nil
+}
+
+// backfillRange parses the backfill's dates.
+func backfillRange(from, to string) (time.Time, time.Time, error) {
+	if from == "" {
+		return time.Time{}, time.Time{}, errors.New("earnings backfill needs --from YYYY-MM-DD")
+	}
+	start, err := time.Parse(time.DateOnly, from)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("--from: %w", err)
+	}
+	end, err := time.Parse(time.DateOnly, to)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("--to: %w", err)
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, errors.New("--to is before --from")
+	}
+	return start, end, nil
+}
+
+// symbolList is a repeatable --symbol flag.
+type symbolList []string
+
+func (s *symbolList) String() string { return strings.Join(*s, ",") }
+
+func (s *symbolList) Set(symbol string) error {
+	*s = append(*s, symbol)
+	return nil
+}
+
+// newEarningsFetcher fetches earnings from finimpulse as configured.
+func newEarningsFetcher(e env) *earnings.Fetcher {
+	cfg := e.cfg.FinimpulseConfig
+	return earnings.NewFetcher(e.conn, finimpulse.New(cfg.BaseURL, cfg.Token), earnings.Options{
+		Types: cfg.EarningsTypes, Methodology: cfg.EarningsMethodology,
+		Lookback: cfg.EarningsLookback, PageSize: cfg.EarningsPage,
+	})
 }

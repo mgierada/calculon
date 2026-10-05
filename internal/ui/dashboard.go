@@ -20,8 +20,16 @@ type Dashboard struct {
 
 // Refresher fetches data off the UI loop, reporting progress as it goes, and
 // returns a summary of what it did for the footer. It stops when ctx is
-// cancelled.
-type Refresher func(ctx context.Context, report *portfolio.Report, progress func(Progress)) (string, error)
+// cancelled. target is what the dashboard shows, e.g. a chosen symbol, empty
+// for dashboards without a choice; see RefreshTargeter.
+type Refresher func(ctx context.Context, report *portfolio.Report, target string,
+	progress func(Progress)) (string, error)
+
+// RefreshTargeter is implemented by a component whose dashboard refreshes
+// one thing the user chose, like an earnings view's symbol.
+type RefreshTargeter interface {
+	RefreshTarget() string
+}
 
 // Progress is how far a refresh has got: Current is the item being worked
 // on, empty once all are done; Finished is the item just completed, with

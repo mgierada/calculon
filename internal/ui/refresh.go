@@ -50,8 +50,29 @@ type refreshing struct {
 	finished []string
 }
 
+// refreshActive starts the active dashboard's refresh, for what its tab
+// shows; nil when it has none or one already runs.
+func (a *App) refreshActive() tea.Cmd {
+	if a.refresh != nil || a.report == nil || a.active >= len(a.dashboards) {
+		return nil
+	}
+	d := a.dashboards[a.active]
+	if d.Refresh == nil {
+		return nil
+	}
+	target := ""
+	if a.active < len(a.tabs) {
+		for _, leaf := range a.tabs[a.active].leaves {
+			if t, ok := leaf.(RefreshTargeter); ok {
+				target = t.RefreshTarget()
+			}
+		}
+	}
+	return a.startRefresh(d, target)
+}
+
 // startRefresh runs the dashboard's refresh off the UI loop.
-func (a *App) startRefresh(d Dashboard) tea.Cmd {
+func (a *App) startRefresh(d Dashboard, target string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	// Room for one progress message and the outcome, so the outcome is
 	// never blocked once progress sends have given up.
@@ -67,7 +88,7 @@ func (a *App) startRefresh(d Dashboard) tea.Cmd {
 	}
 	go func() {
 		defer close(updates)
-		summary, err := d.Refresh(ctx, report, func(p Progress) { send(refreshProgressMsg(p)) })
+		summary, err := d.Refresh(ctx, report, target, func(p Progress) { send(refreshProgressMsg(p)) })
 		// The outcome is sent even when cancelled, to close the box.
 		updates <- refreshDoneMsg{summary: summary, err: err}
 	}()

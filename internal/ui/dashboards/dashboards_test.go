@@ -64,7 +64,7 @@ func render(component ui.Component, width, height int) string {
 
 func TestDashboardsRenderAtTheirSize(t *testing.T) {
 	report := testReport()
-	for _, dashboard := range All(nil) {
+	for _, dashboard := range All(Refreshers{}) {
 		for _, size := range [][2]int{{160, 50}, {80, 24}, {40, 10}} {
 			view := render(dashboard.Build(report), size[0], size[1])
 			if w := lipgloss.Width(view); w > size[0] {
@@ -480,5 +480,118 @@ func TestNewsCopiesLinkFromTableAndArticle(t *testing.T) {
 	}
 	if view := article.View(); !strings.Contains(view, "y copy link") {
 		t.Errorf("article footer does not hint at y:\n%s", view)
+	}
+}
+
+func fp(v float64) *float64 { return &v }
+
+// earningsReport holds EQIX.US with stored earnings like the API's sample.
+func earningsReport() *portfolio.Report {
+	report := testReport()
+	report.Holdings = append(report.Holdings, portfolio.Holding{
+		Account: account, Instrument: model.Instrument{Symbol: "EQIX.US", Name: "Equinix"}, ValueBase: 9000,
+	})
+	q := func(month time.Month) model.EarningsPeriod {
+		return model.EarningsPeriod{Start: time.Date(2026, month, 1, 0, 0, 0, 0, time.UTC), Length: "quarter"}
+	}
+	report.Earnings = map[string]model.Earnings{"EQIX.US": {
+		Symbol: "EQIX.US", Currency: "USD", FetchedAt: time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC), TotalCount: 12,
+		Target:  model.PriceTarget{Price: fp(1011.58), Average: fp(1234.19), Low: fp(1060), High: fp(1380)},
+		Revenue: []model.EarningsRevenue{{EarningsPeriod: q(4), Revenue: fp(2625e6), Earnings: fp(479e6)}},
+		EPS: []model.EarningsEPS{{EarningsPeriod: q(4), Actual: fp(4.83), Estimate: fp(4.7138),
+			Surprise: fp(0.1162), SurprisePct: fp(2.47)}},
+		Growth: []model.EarningsGrowth{
+			{EarningsPeriod: q(4), Growth: fp(0.2602), Benchmark: fp(0.2598), BenchmarkSymbol: "SP5"},
+			{EarningsPeriod: q(7), Growth: fp(0.0388), Benchmark: fp(0.4987), BenchmarkSymbol: "SP5"},
+		},
+	}}
+	return report
+}
+
+func plainView(c ui.Component, width, height int) string {
+	return regexp.MustCompile(`\x1b\[[0-9;:]*[a-zA-Z]`).ReplaceAllString(render(c, width, height), "")
+}
+
+func TestEarningsShowsStoredStock(t *testing.T) {
+	view := plainView(Earnings(earningsReport()), 160, 40)
+	for _, want := range []string{
+		"EQIX.US", "Equinix", "12 data points", "analyst price target", "◆ target 1011.58",
+		"+22.0% against the target price", "data in mln USD", "Q2 '26", "Q3 '26",
+		"Revenue", "2 625.0", "479.0", "18.2%", "S&P 500 growth", "+49.9%",
+		"earnings per share", "4.83", "+2.5%",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("earnings view is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestEarningsWithoutStoredStockAsksToPick(t *testing.T) {
+	if view := plainView(Earnings(testReport()), 120, 10); !strings.Contains(view, "Press p to pick a stock") {
+		t.Errorf("empty earnings view:\n%s", view)
+	}
+}
+
+func TestEarningsPickerShowsStoredOrFetches(t *testing.T) {
+	report := earningsReport()
+	view := Earnings(report).(*EarningsView)
+	view.SetSize(160, 40)
+
+	push, ok := view.Update(tea.KeyPressMsg(tea.Key{Text: "p", Code: 'p'}))().(ui.PushMsg)
+	if !ok {
+		t.Fatal("p did not open the picker")
+	}
+	picker, _ := push.Build(report)
+	picker.SetSize(80, 30)
+	if text := plainView(picker, 80, 30); !strings.Contains(text, "EQIX.US") || !strings.Contains(text, "stored 2026-10-05") {
+		t.Errorf("picker:\n%s", text)
+	}
+
+	// Picking a stock without stored earnings shows it and asks for a fetch
+	// of it; one with stored earnings shows without fetching.
+	if cmd := view.Update(earningsSelectMsg("SNT.PL")); cmd == nil {
+		t.Error("a stock without stored earnings was not fetched")
+	} else if _, ok := cmd().(ui.RefreshRequestMsg); !ok {
+		t.Errorf("picking produced %T, want a refresh", cmd())
+	}
+	if view.RefreshTarget() != "SNT.PL" {
+		t.Errorf("refresh target = %q, want the picked stock", view.RefreshTarget())
+	}
+	if cmd := view.Update(earningsSelectMsg("EQIX.US")); cmd != nil {
+		t.Error("a stock with stored earnings was fetched again")
+	}
+}
+
+// A reload, e.g. after a fetch or a price refresh, keeps the picked stock
+// rather than going back to the latest fetched one.
+func TestEarningsKeepsStockAcrossReload(t *testing.T) {
+	report := earningsReport()
+	old := Earnings(report).(*EarningsView)
+	old.Update(earningsSelectMsg("SNT.PL"))
+
+	rebuilt := Earnings(report).(*EarningsView)
+	rebuilt.SetSize(160, 40)
+	rebuilt.Restore(old.State())
+
+	if rebuilt.RefreshTarget() != "SNT.PL" {
+		t.Errorf("stock after reload = %q, want SNT.PL kept", rebuilt.RefreshTarget())
+	}
+}
+
+func TestPeriodLabels(t *testing.T) {
+	day := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for length, want := range map[string]string{"quarter": "Q3 '26", "year": "2026", "month": "2026-07"} {
+		if got := periodLabel(period{day, length}); got != want {
+			t.Errorf("periodLabel(%s) = %q, want %q", length, got, want)
+		}
+	}
+}
+
+func TestEarningsFitsSmallScreens(t *testing.T) {
+	for _, size := range [][2]int{{160, 50}, {80, 24}, {40, 10}} {
+		view := render(Earnings(earningsReport()), size[0], size[1])
+		if w := lipgloss.Width(view); w > size[0] {
+			t.Errorf("earnings at %v is %d wide", size, w)
+		}
 	}
 }
