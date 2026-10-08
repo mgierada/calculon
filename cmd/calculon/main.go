@@ -24,6 +24,7 @@ import (
 	"github.com/mgierada/calculon/internal/model"
 	"github.com/mgierada/calculon/internal/news"
 	"github.com/mgierada/calculon/internal/portfolio"
+	"github.com/mgierada/calculon/internal/recommendations"
 	"github.com/mgierada/calculon/internal/server"
 	"github.com/mgierada/calculon/internal/ui"
 	"github.com/mgierada/calculon/internal/ui/dashboards"
@@ -46,6 +47,9 @@ usage:
   calculon earnings backfill --from DATE [--to DATE] (--all | --symbol S...)
                                                     fetch earnings history of
                                                     held symbols, e.g. --from 2016-01-01
+  calculon recommendations backfill --from DATE [--to DATE] (--all | --symbol S...)
+                                                    fetch analyst recommendations
+                                                    of held symbols
 
 --user defaults to CALCULON_USER, or to the only user when there is just one.
 `
@@ -73,6 +77,8 @@ func main() {
 		err = runAccount(args)
 	case "earnings":
 		err = runEarnings(args)
+	case "recommendations":
+		err = runRecommendations(args)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
@@ -145,7 +151,30 @@ func runServe() error {
 
 // refreshers fetch what the API-backed dashboards show when r is pressed.
 func refreshers(e env) dashboards.Refreshers {
-	return dashboards.Refreshers{News: newsRefresher(e), Earnings: earningsRefresher(e)}
+	return dashboards.Refreshers{
+		News: newsRefresher(e), Earnings: earningsRefresher(e),
+		Recommendations: recommendationsRefresher(e),
+	}
+}
+
+// recommendationsRefresher fetches the shown stock's analyst recommendations
+// over the configured lookback, page by page.
+func recommendationsRefresher(e env) ui.Refresher {
+	fetcher := newRecommendationsFetcher(e)
+	return func(ctx context.Context, _ *portfolio.Report, symbol string,
+		progress func(ui.Progress)) (string, error) {
+		if symbol == "" {
+			return "", errors.New("pick a stock with p first")
+		}
+		progress(ui.Progress{Total: 1, Current: symbol})
+		result, err := fetcher.FetchRecent(ctx, symbol, func(p recommendations.Page) {
+			progress(ui.Progress{Done: p.Items, Total: max(p.Total, p.Items), Current: symbol})
+		})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("recommendations: %s, %d months", symbol, result.Items), nil
+	}
 }
 
 // earningsRefresher fetches the shown stock's earnings over the configured
@@ -491,10 +520,41 @@ func parseInterspersed(flags *flag.FlagSet, args []string) ([]string, error) {
 
 // runEarnings backfills earnings history from the API.
 func runEarnings(args []string) error {
+	return runBackfill("earnings", args, func(e env) backfillFetch {
+		fetcher := newEarningsFetcher(e)
+		return func(ctx context.Context, symbol string, from, to time.Time) (int, int, error) {
+			result, err := fetcher.Fetch(ctx, symbol, from, to, func(p earnings.Page) {
+				log.Printf("%s  page %d: %d of %d items", symbol, p.Number, p.Items, p.Total)
+			})
+			return result.Items, result.Pages, err
+		}
+	})
+}
+
+// runRecommendations backfills analyst recommendations from the API.
+func runRecommendations(args []string) error {
+	return runBackfill("recommendations", args, func(e env) backfillFetch {
+		fetcher := newRecommendationsFetcher(e)
+		return func(ctx context.Context, symbol string, from, to time.Time) (int, int, error) {
+			result, err := fetcher.Fetch(ctx, symbol, from, to, func(p recommendations.Page) {
+				log.Printf("%s  page %d: %d of %d items", symbol, p.Number, p.Items, p.Total)
+			})
+			return result.Items, result.Pages, err
+		}
+	})
+}
+
+// backfillFetch stores one symbol's data between from and to, returning how
+// many items it stored in how many pages.
+type backfillFetch func(ctx context.Context, symbol string, from, to time.Time) (int, int, error)
+
+// runBackfill parses a backfill subcommand of command and fetches each symbol
+// in turn, logging failures and carrying on.
+func runBackfill(command string, args []string, newFetch func(env) backfillFetch) error {
 	if len(args) == 0 || args[0] != "backfill" {
-		return fmt.Errorf("earnings needs a subcommand: backfill\n\n%s", usage)
+		return fmt.Errorf("%s needs a subcommand: backfill\n\n%s", command, usage)
 	}
-	flags := flag.NewFlagSet("earnings backfill", flag.ContinueOnError)
+	flags := flag.NewFlagSet(command+" backfill", flag.ContinueOnError)
 	from := flags.String("from", "", "first period to fetch, YYYY-MM-DD")
 	to := flags.String("to", time.Now().Format(time.DateOnly), "last period to fetch, YYYY-MM-DD")
 	all := flags.Bool("all", false, "every held symbol")
@@ -503,12 +563,12 @@ func runEarnings(args []string) error {
 	if _, err := parseInterspersed(flags, args[1:]); err != nil {
 		return err
 	}
-	start, end, err := backfillRange(*from, *to)
+	start, end, err := backfillRange(command, *from, *to)
 	if err != nil {
 		return err
 	}
 	if *all == (len(symbols) > 0) {
-		return errors.New("earnings backfill needs either --all or --symbol")
+		return fmt.Errorf("%s backfill needs either --all or --symbol", command)
 	}
 
 	env, err := openEnv()
@@ -524,11 +584,9 @@ func runEarnings(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fetcher := newEarningsFetcher(env)
+	fetch := newFetch(env)
 	for _, symbol := range symbols {
-		result, err := fetcher.Fetch(ctx, symbol, start, end, func(p earnings.Page) {
-			log.Printf("%s  page %d: %d of %d items", symbol, p.Number, p.Items, p.Total)
-		})
+		items, pages, err := fetch(ctx, symbol, start, end)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -536,15 +594,15 @@ func runEarnings(args []string) error {
 			log.Printf("%s  failed: %v", symbol, err)
 			continue
 		}
-		log.Printf("%s  stored %d items in %d pages", symbol, result.Items, result.Pages)
+		log.Printf("%s  stored %d items in %d pages", symbol, items, pages)
 	}
 	return nil
 }
 
 // backfillRange parses the backfill's dates.
-func backfillRange(from, to string) (time.Time, time.Time, error) {
+func backfillRange(command, from, to string) (time.Time, time.Time, error) {
 	if from == "" {
-		return time.Time{}, time.Time{}, errors.New("earnings backfill needs --from YYYY-MM-DD")
+		return time.Time{}, time.Time{}, fmt.Errorf("%s backfill needs --from YYYY-MM-DD", command)
 	}
 	start, err := time.Parse(time.DateOnly, from)
 	if err != nil {
@@ -577,4 +635,12 @@ func newEarningsFetcher(e env) *earnings.Fetcher {
 		Types: cfg.EarningsTypes, Methodology: cfg.EarningsMethodology,
 		Lookback: cfg.EarningsLookback, PageSize: cfg.EarningsPage,
 	})
+}
+
+// newRecommendationsFetcher fetches analyst recommendations from finimpulse as
+// configured.
+func newRecommendationsFetcher(e env) *recommendations.Fetcher {
+	cfg := e.cfg.FinimpulseConfig
+	return recommendations.NewFetcher(e.conn, finimpulse.New(cfg.BaseURL, cfg.Token),
+		recommendations.Options{Lookback: cfg.RecommendationsLookback, PageSize: cfg.RecommendationsPage})
 }

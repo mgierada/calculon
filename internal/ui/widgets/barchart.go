@@ -20,10 +20,12 @@ var gradient = []color.Color{
 	lipgloss.Color("196"),
 }
 
-// Bar is one labelled value in a BarChart.
+// Bar is one labelled value in a BarChart or a StackBar segment. Color sets
+// a segment's colour; nil takes the next of the palette.
 type Bar struct {
 	Label string
 	Value float64
+	Color color.Color
 }
 
 // BarChart draws horizontal bars sorted largest first, with the value printed

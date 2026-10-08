@@ -51,7 +51,7 @@ func Load(conn *sql.DB, user db.User, opts Options, scope *model.AccountKey) (Re
 }
 
 // withNews attaches the stored news about the report's biggest holdings, and
-// the stored earnings of every holding.
+// the stored earnings and analyst recommendations of every holding.
 func withNews(conn *sql.DB, report Report, opts Options) (Report, error) {
 	report.NewsSymbols = TopSymbols(report.Holdings, opts.News.Positions)
 	var err error
@@ -59,6 +59,7 @@ func withNews(conn *sql.DB, report Report, opts Options) (Report, error) {
 		return report, err
 	}
 	report.Earnings = map[string]model.Earnings{}
+	report.Recommendations = map[string]model.Recommendations{}
 	for _, symbol := range TopSymbols(report.Holdings, len(report.Holdings)) {
 		earnings, ok, err := db.EarningsOf(conn, symbol, opts.EarningsMethodology)
 		if err != nil {
@@ -66,6 +67,13 @@ func withNews(conn *sql.DB, report Report, opts Options) (Report, error) {
 		}
 		if ok {
 			report.Earnings[symbol] = earnings
+		}
+		recs, ok, err := db.RecommendationsOf(conn, symbol)
+		if err != nil {
+			return report, err
+		}
+		if ok {
+			report.Recommendations[symbol] = recs
 		}
 	}
 	return report, nil

@@ -131,7 +131,7 @@ func TestTableFilterCapturesInput(t *testing.T) {
 }
 
 func TestStackBarFillsWidthExactly(t *testing.T) {
-	bar := NewStackBar("allocation", []Bar{{"a", 1}, {"b", 1}, {"c", 1}, {"cash", -5}})
+	bar := NewStackBar("allocation", []Bar{{Label: "a", Value: 1}, {Label: "b", Value: 1}, {Label: "c", Value: 1}, {Label: "cash", Value: -5}})
 
 	got := bar.bar(10)
 	if width := lipgloss.Width(got); width != 10 {
@@ -143,7 +143,7 @@ func TestStackBarFillsWidthExactly(t *testing.T) {
 }
 
 func TestStackBarLegendFitsWidth(t *testing.T) {
-	bar := NewStackBar("allocation", []Bar{{"AAAAAAAA", 5}, {"BBBBBBBB", 3}, {"CCCCCCCC", 2}})
+	bar := NewStackBar("allocation", []Bar{{Label: "AAAAAAAA", Value: 5}, {Label: "BBBBBBBB", Value: 3}, {Label: "CCCCCCCC", Value: 2}})
 
 	if width := lipgloss.Width(bar.legend(40)); width > 40 {
 		t.Errorf("legend width = %d, want at most 40", width)

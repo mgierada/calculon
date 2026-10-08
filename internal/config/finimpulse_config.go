@@ -22,4 +22,9 @@ type FinimpulseConfig struct {
 	EarningsMethodology string        `env:"FINIMPULSE_EARNINGS_METHODOLOGY" env-default:"gaap"`
 	EarningsLookback    time.Duration `env:"FINIMPULSE_EARNINGS_LOOKBACK" env-default:"17520h"`
 	EarningsPage        int           `env:"FINIMPULSE_EARNINGS_PAGE" env-default:"50"`
+	// Recommendation requests ask for RecommendationsPage months a page.
+	// RecommendationsLookback is how far back the dashboard's r reaches; a
+	// backfill sets its own start.
+	RecommendationsLookback time.Duration `env:"FINIMPULSE_RECOMMENDATIONS_LOOKBACK" env-default:"17520h"`
+	RecommendationsPage     int           `env:"FINIMPULSE_RECOMMENDATIONS_PAGE" env-default:"50"`
 }

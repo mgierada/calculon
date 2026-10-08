@@ -595,3 +595,103 @@ func TestEarningsFitsSmallScreens(t *testing.T) {
 		}
 	}
 }
+
+// recommendationsReport holds SNT.PL with three stored months, the consensus
+// slipping from buy to hold.
+func recommendationsReport() *portfolio.Report {
+	report := testReport()
+	month := func(m time.Month) time.Time { return time.Date(2026, m, 1, 0, 0, 0, 0, time.UTC) }
+	report.Recommendations = map[string]model.Recommendations{"SNT.PL": {
+		Symbol: "SNT.PL", FetchedAt: time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC),
+		Months: []model.Recommendation{
+			{Month: month(7), StrongBuy: 1, Buy: 3},
+			{Month: month(8), Buy: 3, Hold: 1},
+			{Month: month(9), Buy: 1, Hold: 2, Sell: 1},
+		},
+	}}
+	return report
+}
+
+func TestRecommendationsShowsStoredStock(t *testing.T) {
+	view := plainView(Recommendations(recommendationsReport()), 160, 40)
+	for _, want := range []string{
+		"SNT.PL", "Hold · 4 analysts", "3 months", "Sep '26", "Jul '26",
+		"Strong buy", "Score", "1.75", "3.00", "+0.75", "Buy %", "75.0%",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("recommendations view is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestRecommendationsWithoutStoredStockAsksToPick(t *testing.T) {
+	view := plainView(Recommendations(testReport()), 120, 10)
+	if !strings.Contains(view, "Press p to pick a stock") {
+		t.Errorf("empty recommendations view:\n%s", view)
+	}
+}
+
+func TestRecommendationsPickerShowsStoredOrFetches(t *testing.T) {
+	report := recommendationsReport()
+	view := Recommendations(report).(*RecommendationsView)
+	view.SetSize(160, 40)
+
+	push, ok := view.Update(tea.KeyPressMsg(tea.Key{Text: "p", Code: 'p'}))().(ui.PushMsg)
+	if !ok {
+		t.Fatal("p did not open the picker")
+	}
+	picker, _ := push.Build(report)
+	picker.SetSize(80, 30)
+	if text := plainView(picker, 80, 30); !strings.Contains(text, "stored 2026-10-08") {
+		t.Errorf("picker:\n%s", text)
+	}
+
+	if cmd := view.Update(recommendationsSelectMsg("CDR.PL")); cmd == nil {
+		t.Error("a stock without stored recommendations was not fetched")
+	} else if _, ok := cmd().(ui.RefreshRequestMsg); !ok {
+		t.Errorf("picking produced %T, want a refresh", cmd())
+	}
+	if view.RefreshTarget() != "CDR.PL" {
+		t.Errorf("refresh target = %q, want the picked stock", view.RefreshTarget())
+	}
+	if cmd := view.Update(recommendationsSelectMsg("SNT.PL")); cmd != nil {
+		t.Error("a stock with stored recommendations was fetched again")
+	}
+}
+
+func TestRecommendationsKeepsStockAcrossReload(t *testing.T) {
+	report := recommendationsReport()
+	old := Recommendations(report).(*RecommendationsView)
+	old.Update(recommendationsSelectMsg("CDR.PL"))
+
+	rebuilt := Recommendations(report).(*RecommendationsView)
+	rebuilt.SetSize(160, 40)
+	rebuilt.Restore(old.State())
+
+	if rebuilt.RefreshTarget() != "CDR.PL" {
+		t.Errorf("stock after reload = %q, want CDR.PL kept", rebuilt.RefreshTarget())
+	}
+}
+
+func TestConsensusNamesNearestRating(t *testing.T) {
+	for r, want := range map[model.Recommendation]string{
+		{StrongBuy: 2}:           "Strong buy",
+		{Buy: 3, Hold: 1}:        "Buy",
+		{Buy: 1, Sell: 1}:        "Hold",
+		{StrongSell: 3, Sell: 1}: "Strong sell",
+		{}:                       "No ratings",
+	} {
+		if got := consensus(r); got != want {
+			t.Errorf("consensus(%+v) = %q, want %q", r, got, want)
+		}
+	}
+}
+
+func TestRecommendationsFitsSmallScreens(t *testing.T) {
+	for _, size := range [][2]int{{160, 50}, {80, 24}, {40, 10}} {
+		view := render(Recommendations(recommendationsReport()), size[0], size[1])
+		if w := lipgloss.Width(view); w > size[0] {
+			t.Errorf("recommendations at %v is %d wide", size, w)
+		}
+	}
+}

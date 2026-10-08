@@ -380,3 +380,33 @@ type EarningsGrowth struct {
 	Growth, Benchmark *float64
 	BenchmarkSymbol   string
 }
+
+// Recommendations is a symbol's stored analyst recommendations, oldest month
+// first.
+type Recommendations struct {
+	Symbol    string
+	FetchedAt time.Time
+	Months    []Recommendation
+}
+
+// Recommendation counts the analysts rating a symbol each way in a month.
+type Recommendation struct {
+	Month                                  time.Time
+	StrongBuy, Buy, Hold, Sell, StrongSell int
+}
+
+// Analysts is how many analysts rated the symbol that month.
+func (r Recommendation) Analysts() int {
+	return r.StrongBuy + r.Buy + r.Hold + r.Sell + r.StrongSell
+}
+
+// Score is the analysts' mean rating from 1 (strong buy) to 5 (strong sell),
+// false when nobody rated the symbol.
+func (r Recommendation) Score() (float64, bool) {
+	analysts := r.Analysts()
+	if analysts == 0 {
+		return 0, false
+	}
+	weighted := r.StrongBuy + 2*r.Buy + 3*r.Hold + 4*r.Sell + 5*r.StrongSell
+	return float64(weighted) / float64(analysts), true
+}
