@@ -149,8 +149,11 @@ type Report struct {
 	// Earnings holds the stored earnings of every holding fetched before, by
 	// symbol.
 	Earnings map[string]model.Earnings
-	Closed   []model.Owned[model.Position]
-	CashOps  []model.Owned[model.CashOp]
+	// Recommendations holds the stored analyst recommendations of every
+	// holding fetched before, by symbol.
+	Recommendations map[string]model.Recommendations
+	Closed          []model.Owned[model.Position]
+	CashOps         []model.Owned[model.CashOp]
 	// Warnings are data problems worth surfacing, e.g. a missing FX rate.
 	Warnings []string
 }

@@ -100,7 +100,7 @@ func (s *StackBar) bar(width int) string {
 
 	var b strings.Builder
 	for i, w := range widths {
-		style := lipgloss.NewStyle().Foreground(segmentPalette[i%len(segmentPalette)])
+		style := lipgloss.NewStyle().Foreground(s.color(i))
 		b.WriteString(style.Render(strings.Repeat("█", w)))
 	}
 	return b.String()
@@ -115,7 +115,7 @@ func (s *StackBar) legend(width int) string {
 	entries := []string{titleStyle.Render(s.title)}
 	used := lipgloss.Width(entries[0])
 	for i, segment := range s.segments {
-		marker := lipgloss.NewStyle().Foreground(segmentPalette[i%len(segmentPalette)]).Render("■")
+		marker := lipgloss.NewStyle().Foreground(s.color(i)).Render("■")
 		entry := fmt.Sprintf("%s %s %.1f%%", marker, segment.Label, segment.Value/total*100)
 		if used+2+lipgloss.Width(entry) > width {
 			break
@@ -124,4 +124,12 @@ func (s *StackBar) legend(width int) string {
 		used += 2 + lipgloss.Width(entry)
 	}
 	return strings.Join(entries, "  ")
+}
+
+// color is segment i's own colour, or its place in the palette.
+func (s *StackBar) color(i int) color.Color {
+	if c := s.segments[i].Color; c != nil {
+		return c
+	}
+	return segmentPalette[i%len(segmentPalette)]
 }

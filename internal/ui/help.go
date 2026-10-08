@@ -56,6 +56,11 @@ var bindingGroups = []struct {
 		{"r", "fetch the shown stock's earnings again"},
 		{"← / →", "scroll the reporting periods"},
 	}},
+	{"Recommendations", []binding{
+		{"p", "pick a stock you hold"},
+		{"r", "fetch the shown stock's recommendations again"},
+		{"← / →", "scroll the months"},
+	}},
 	{"Overview", []binding{
 		{"g", "allocation: change grouping"},
 		{"m", "returns: cycle TWR / XIRR / CAGR"},

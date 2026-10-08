@@ -11,8 +11,9 @@ import (
 // Refreshers fetch the data of the dashboards that call an API, run when r
 // is pressed on their tab; a nil one leaves r a plain reload there.
 type Refreshers struct {
-	News     ui.Refresher
-	Earnings ui.Refresher
+	News            ui.Refresher
+	Earnings        ui.Refresher
+	Recommendations ui.Refresher
 }
 
 // All lists the dashboards in tab order.
@@ -23,5 +24,6 @@ func All(refresh Refreshers) []ui.Dashboard {
 		{Title: "History", Build: History},
 		{Title: "News", Build: News, Refresh: refresh.News},
 		{Title: "Earnings", Build: Earnings, Refresh: refresh.Earnings},
+		{Title: "Recommendations", Build: Recommendations, Refresh: refresh.Recommendations},
 	}
 }

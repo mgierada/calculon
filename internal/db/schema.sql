@@ -275,3 +275,17 @@ CREATE TABLE IF NOT EXISTS earnings_revenue (
     fetched_at  TEXT NOT NULL,
     PRIMARY KEY (symbol, date, date_type, methodology)
 );
+
+-- Analyst recommendations, one row per month, overwritten when a fetch
+-- reports a month again so revised counts win. date is the month's first day.
+CREATE TABLE IF NOT EXISTS recommendation (
+    symbol      TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    strong_buy  INTEGER NOT NULL,
+    buy         INTEGER NOT NULL,
+    hold        INTEGER NOT NULL,
+    sell        INTEGER NOT NULL,
+    strong_sell INTEGER NOT NULL,
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (symbol, date)
+);

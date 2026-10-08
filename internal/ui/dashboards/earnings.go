@@ -114,7 +114,9 @@ func (v *EarningsView) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyPressMsg:
 		key := msg.String()
 		if key == pickStockKey {
-			return ui.Push("pick a stock", stockPicker)
+			return ui.Push("pick a stock", holdingPicker(earningsFetched, func(symbol string) tea.Msg {
+				return earningsSelectMsg(symbol)
+			}))
 		}
 		if v.matrix != nil && v.matrix.Scroll(key) {
 			return nil
@@ -165,39 +167,51 @@ func (v *EarningsView) SetFocused(focused bool) {
 // View implements ui.Component.
 func (v *EarningsView) View() string { return v.body.View() }
 
-// stockPicker lists the held stocks, biggest first, noting which have stored
-// earnings; choosing one closes the picker and shows it.
-func stockPicker(report *portfolio.Report) (ui.Component, bool) {
-	value, names := map[string]float64{}, map[string]string{}
-	for _, h := range report.Holdings {
-		value[h.Symbol] += h.ValueBase
-		names[h.Symbol] = h.Name
-	}
-	symbols := portfolio.TopSymbols(report.Holdings, len(report.Holdings))
-	items := make([]widgets.ListItem, 0, len(symbols))
-	for _, symbol := range symbols {
-		detail := fmt.Sprintf("%s · %s", names[symbol], money(value[symbol], report.Base))
-		if e, ok := report.Earnings[symbol]; ok {
-			detail += " · stored " + date(e.FetchedAt)
+// holdingPicker lists the held stocks, biggest first, noting when each one's
+// data was fetched; choosing one closes the picker and sends pick's message.
+func holdingPicker(fetched func(*portfolio.Report, string) (time.Time, bool),
+	pick func(symbol string) tea.Msg) ui.ScreenBuilder {
+	return func(report *portfolio.Report) (ui.Component, bool) {
+		value, names := map[string]float64{}, map[string]string{}
+		for _, h := range report.Holdings {
+			value[h.Symbol] += h.ValueBase
+			names[h.Symbol] = h.Name
 		}
-		items = append(items, widgets.ListItem{Name: symbol, Detail: detail, Value: symbol})
+		symbols := portfolio.TopSymbols(report.Holdings, len(report.Holdings))
+		items := make([]widgets.ListItem, 0, len(symbols))
+		for _, symbol := range symbols {
+			detail := fmt.Sprintf("%s · %s", names[symbol], money(value[symbol], report.Base))
+			if at, ok := fetched(report, symbol); ok {
+				detail += " · stored " + date(at)
+			}
+			items = append(items, widgets.ListItem{Name: symbol, Detail: detail, Value: symbol})
+		}
+		return widgets.NewListPicker("Pick a stock", items, func(item widgets.ListItem) tea.Cmd {
+			symbol := fmt.Sprint(item.Value)
+			return tea.Sequence(ui.Pop(), func() tea.Msg { return pick(symbol) })
+		}), true
 	}
-	return widgets.NewListPicker("Pick a stock", items, func(item widgets.ListItem) tea.Cmd {
-		symbol := fmt.Sprint(item.Value)
-		return tea.Sequence(ui.Pop(), func() tea.Msg { return earningsSelectMsg(symbol) })
-	}), true
+}
+
+// earningsFetched is when a symbol's stored earnings were fetched.
+func earningsFetched(report *portfolio.Report, symbol string) (time.Time, bool) {
+	e, ok := report.Earnings[symbol]
+	return e.FetchedAt, ok
+}
+
+// holdingName is a held symbol's instrument name, the symbol when not held.
+func holdingName(report *portfolio.Report, symbol string) string {
+	for _, h := range report.Holdings {
+		if h.Symbol == symbol {
+			return h.Name
+		}
+	}
+	return symbol
 }
 
 // earningsHeader names the stock and says how current its data is.
 func earningsHeader(report *portfolio.Report, e model.Earnings) *widgets.Stat {
-	name := e.Symbol
-	for _, h := range report.Holdings {
-		if h.Symbol == e.Symbol {
-			name = h.Name
-			break
-		}
-	}
-	return widgets.NewStat(e.Symbol+" · "+name, fmt.Sprintf("%d data points", e.TotalCount)).
+	return widgets.NewStat(e.Symbol+" · "+holdingName(report, e.Symbol), fmt.Sprintf("%d data points", e.TotalCount)).
 		WithNote("fetched "+dateTime(e.FetchedAt)+" · p change", widgets.Muted)
 }
 
