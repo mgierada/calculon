@@ -13,9 +13,10 @@
       in {
         devShells.default = pkgs.mkShell {
           packages = [
-            pkgs.go_1_26
+            pkgs.go_1_27
             pkgs.gitleaks
             pkgs.go-migrate
+            pkgs.golangci-lint
           ];
         };
       });
