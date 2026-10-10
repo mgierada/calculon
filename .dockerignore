@@ -1,0 +1,18 @@
+# secrets and local state: mounted at runtime, never baked into the image
+.env
+.envrc
+*.db
+*.db-wal
+*.db-shm
+.ssh/
+requests/http-client.private.env.json
+
+# not needed for the build
+.git
+.direnv
+.claude
+.grip
+bin/
+requests/
+Dockerfile
+.dockerignore
