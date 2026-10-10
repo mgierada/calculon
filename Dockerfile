@@ -7,11 +7,8 @@ RUN go mod download && go mod verify
 COPY . .
 RUN CGO_ENABLED=0 go build -v -o /calculon ./cmd/calculon
 
-FROM debian:bookworm-slim
+FROM alpine:3.24
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /calculon /usr/local/bin/
 
 # Mount the directory holding calculon.db and .ssh/ here to keep them across runs.
