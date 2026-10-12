@@ -1,0 +1,26 @@
+app = 'calculon'
+primary_region = 'ams'
+
+[build]
+[build.args]
+GO_VERSION = '1.27.2'
+
+[mounts]
+source = 'calculon_data'
+destination = '/data'
+
+[[services]]
+internal_port = 23234
+protocol = 'tcp'
+auto_stop_machines = 'stop'
+auto_start_machines = true
+min_machines_running = 0
+processes = ['app']
+
+[[services.ports]]
+port = 22
+
+[[vm]]
+memory = '256mb'
+cpu_kind = 'shared'
+cpus = 1
