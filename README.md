@@ -13,3 +13,18 @@ Access:
 ```
 ssh -p 23234 localhost
 ```
+
+
+Push local db:
+
+```bash
+fly ssh sftp put calculon.db /data/calculon.db.restore -a calculon
+
+```
+
+Rewire:
+```bash
+fly ssh console -a calculon -C "sh -c 'cd /data && rm -f calculon.db-wal calculon.db-shm && mv calculon.db.restore calculon.db'"
+
+fly apps restart calculon
+ ```

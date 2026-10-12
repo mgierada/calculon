@@ -51,3 +51,21 @@ reset-db: ## delete the database at DB_PATH (asks first)
 
 clean: ## remove build output
 	rm -rf bin
+
+push_db: ## push local db to overwrite the remote
+	fly ssh sftp put calculon.db /data/calculon.db.restore -a calculon
+
+swap_db:
+	fly ssh console -a calculon -C "sh -c 'cd /data && rm -f calculon.db-wal calculon.db-shm && mv calculon.db.restore calculon.db'"
+
+restart:
+	fly apps restart calculon
+
+deploy:
+	fly deploy
+
+scale:
+	fly scale count 1 -a calculon
+
+create_volume:
+	fly volumes create calculon_data -r ams -s 1 -a calculon
