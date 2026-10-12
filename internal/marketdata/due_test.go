@@ -49,11 +49,11 @@ func TestPollWaitsForOpenOnceCloseIsStored(t *testing.T) {
 	}}
 	poller, now := setup(t, fetcher, "AMT.US")
 	*now = time.Date(2026, 10, 2, 16, 20, 0, 0, newYork)
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
 
 	*now = time.Date(2026, 10, 3, 12, 0, 0, 0, newYork)
 	fetcher.requests = nil
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
 	if len(fetcher.requests) != 0 {
 		t.Errorf("requests = %v, want none on the weekend", fetcher.requests)
 	}
@@ -67,12 +67,12 @@ func TestPollCatchesUpOnMissedClose(t *testing.T) {
 	}}
 	poller, now := setup(t, fetcher, "AMT.US")
 	*now = time.Date(2026, 10, 2, 14, 0, 0, 0, newYork)
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
 
 	*now = time.Date(2026, 10, 3, 12, 0, 0, 0, newYork)
 	fetcher.requests = nil
-	poller.poll(context.Background())
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
+	poller.poll(context.Background(), interval)
 	if len(fetcher.requests) != 1 {
 		t.Errorf("requests = %v, want one catch-up fetch", fetcher.requests)
 	}

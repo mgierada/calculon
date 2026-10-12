@@ -19,6 +19,10 @@ import (
 // quoteSource names the quotes taken from finimpulse.
 const quoteSource = "finimpulse"
 
+// refreshAge is how old a price may be before Refresh fetches it again, so a
+// burst of refreshes calls the API at most once a minute per symbol.
+const refreshAge = time.Minute
+
 // subUnitCurrencies quote prices in hundredths of a currency, e.g. pence on
 // the LSE.
 // TODO: confirm which unit XTB values these instruments in and convert rather
@@ -49,8 +53,9 @@ type Poller struct {
 	logf     func(format string, args ...any)
 	now      func() time.Time
 
-	mu   sync.Mutex
-	subs map[chan Update]struct{}
+	mu      sync.Mutex
+	subs    map[chan Update]struct{}
+	refresh chan struct{}
 }
 
 // NewPoller polls fetcher every interval. logf receives failures; nil drops
@@ -62,7 +67,7 @@ func NewPoller(conn *sql.DB, fetcher Fetcher, interval time.Duration,
 	}
 	return &Poller{
 		conn: conn, fetcher: fetcher, interval: interval, logf: logf, now: time.Now,
-		subs: map[chan Update]struct{}{},
+		subs: map[chan Update]struct{}{}, refresh: make(chan struct{}, 1),
 	}
 }
 
@@ -85,25 +90,41 @@ func (p *Poller) Subscribe() (<-chan Update, func()) {
 	}
 }
 
+// Refresh asks Run to fetch, without waiting for the interval, every price
+// older than refreshAge whose exchange trades, e.g. when someone opens the
+// dashboards. It never blocks; refreshes asked during a poll coalesce.
+func (p *Poller) Refresh() {
+	select {
+	case p.refresh <- struct{}{}:
+	default:
+	}
+}
+
 // Run polls until ctx is cancelled: right away for whatever is stale, then
-// whenever the next symbol falls due.
+// whenever the next symbol falls due or a refresh is asked for.
 func (p *Poller) Run(ctx context.Context) {
+	maxAge := p.interval
 	for {
-		next := p.poll(ctx)
+		next := p.poll(ctx, maxAge)
 		timer := time.NewTimer(next.Sub(p.now()))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-timer.C:
+			maxAge = p.interval
+		case <-p.refresh:
+			timer.Stop()
+			maxAge = refreshAge
 		}
 	}
 }
 
-// poll fetches every due target and returns when the next one falls due, at
-// most an interval away so newly imported symbols are picked up. A failed
-// fetch waits that interval rather than retrying in a hot loop.
-func (p *Poller) poll(ctx context.Context) time.Time {
+// poll fetches every target older than maxAge, by the rules of dueAt, and
+// returns when the next one falls due, at most an interval away so newly
+// imported symbols are picked up. A failed fetch waits that interval rather
+// than retrying in a hot loop.
+func (p *Poller) poll(ctx context.Context, maxAge time.Duration) time.Time {
 	now := p.now()
 	next := now.Add(p.interval)
 
@@ -115,8 +136,8 @@ func (p *Poller) poll(ctx context.Context) time.Time {
 
 	update := Update{At: now}
 	for _, target := range targets {
-		if due := dueAt(target.Symbol, target.LastFetched, p.interval); due.After(now) {
-			next = earliest(next, due)
+		if dueAt(target.Symbol, target.LastFetched, maxAge).After(now) {
+			next = earliest(next, dueAt(target.Symbol, target.LastFetched, p.interval))
 			continue
 		}
 		if ctx.Err() != nil {

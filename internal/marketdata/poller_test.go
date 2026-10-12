@@ -91,7 +91,7 @@ func TestPollFetchesHeldSymbolsAndNotifies(t *testing.T) {
 	updates, cancel := poller.Subscribe()
 	defer cancel()
 
-	next := poller.poll(context.Background())
+	next := poller.poll(context.Background(), interval)
 
 	if !slices.Equal(fetcher.requests, []string{"AMT", "XTB.WA"}) {
 		t.Errorf("requests = %v, want mapped held symbols only", fetcher.requests)
@@ -130,11 +130,11 @@ func TestPollSkipsFreshPricesAndWakesWhenStale(t *testing.T) {
 		"XTB.WA": marketPrice("XTB.WA", "PLN", 150.56),
 	}}
 	poller, now := setup(t, fetcher, "XTB.PL")
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
 
 	*now = start.Add(10 * time.Minute)
 	fetcher.requests = nil
-	next := poller.poll(context.Background())
+	next := poller.poll(context.Background(), interval)
 
 	if len(fetcher.requests) != 0 {
 		t.Errorf("requests = %v, want none while fresh", fetcher.requests)
@@ -144,7 +144,7 @@ func TestPollSkipsFreshPricesAndWakesWhenStale(t *testing.T) {
 	}
 
 	*now = start.Add(interval)
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
 	if len(fetcher.requests) != 1 {
 		t.Errorf("requests = %v, want a fetch once stale", fetcher.requests)
 	}
@@ -158,7 +158,7 @@ func TestPollReportsFailuresAndKeepsGoing(t *testing.T) {
 	updates, cancel := poller.Subscribe()
 	defer cancel()
 
-	next := poller.poll(context.Background())
+	next := poller.poll(context.Background(), interval)
 
 	update := <-updates
 	if update.Fetched != 1 || !slices.Equal(update.Failed, []string{"AMT.US"}) {
@@ -243,7 +243,7 @@ func TestPollStoresSessionClose(t *testing.T) {
 	price := marketPrice("XTB.WA", "PLN", 150.56)
 	poller, _ := setup(t, &fakeFetcher{prices: map[string]finimpulse.MarketPrice{"XTB.WA": price}}, "XTB.PL")
 
-	poller.poll(context.Background())
+	poller.poll(context.Background(), interval)
 
 	var date string
 	var close float64
@@ -254,4 +254,70 @@ func TestPollStoresSessionClose(t *testing.T) {
 	if date != "2026-09-30" || close != 150.56 {
 		t.Errorf("close = %s %v, want 2026-09-30 150.56", date, close)
 	}
+}
+
+// A refresh fetches prices older than refreshAge though the interval has not
+// passed, but keeps the next wake on the interval.
+func TestPollRefreshFetchesPricesOlderThanRefreshAge(t *testing.T) {
+	fetcher := &fakeFetcher{prices: map[string]finimpulse.MarketPrice{
+		"XTB.WA": marketPrice("XTB.WA", "PLN", 150.56),
+	}}
+	poller, now := setup(t, fetcher, "XTB.PL")
+	poller.poll(context.Background(), interval)
+
+	*now = start.Add(30 * time.Second)
+	fetcher.requests = nil
+	poller.poll(context.Background(), refreshAge)
+	if len(fetcher.requests) != 0 {
+		t.Errorf("requests = %v, want none within refreshAge", fetcher.requests)
+	}
+
+	*now = start.Add(5 * time.Minute)
+	next := poller.poll(context.Background(), refreshAge)
+	if len(fetcher.requests) != 1 {
+		t.Errorf("requests = %v, want a fetch past refreshAge", fetcher.requests)
+	}
+	if !next.Equal(now.Add(interval)) {
+		t.Errorf("next = %v, want one interval after the refresh", next)
+	}
+}
+
+// Regression: a session opening within the interval of the last poll waited
+// up to the whole interval for prices.
+func TestRunPollsOnRefresh(t *testing.T) {
+	fetcher := &fakeFetcher{prices: map[string]finimpulse.MarketPrice{
+		"XTB.WA": marketPrice("XTB.WA", "PLN", 150.56),
+	}}
+	poller, now := setup(t, fetcher, "XTB.PL")
+	poller.poll(context.Background(), interval)
+	*now = start.Add(5 * time.Minute)
+
+	updates, cancel := poller.Subscribe()
+	defer cancel()
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		poller.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		stop()
+		<-done
+	}()
+
+	poller.Refresh()
+	select {
+	case update := <-updates:
+		if update.Fetched != 1 {
+			t.Errorf("update = %+v, want the stale price fetched", update)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no update after Refresh")
+	}
+}
+
+func TestRefreshNeverBlocks(t *testing.T) {
+	poller := NewPoller(nil, nil, interval, nil)
+	poller.Refresh()
+	poller.Refresh()
 }

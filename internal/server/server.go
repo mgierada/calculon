@@ -38,7 +38,8 @@ type Options struct {
 	Conn        *sql.DB
 	Dashboards  []ui.Dashboard
 	Report      portfolio.Options
-	// Prices reloads every session's dashboards on new prices; nil for none.
+	// Prices reloads every session's dashboards on new prices, refreshing
+	// them as each session opens; nil for none.
 	Prices *marketdata.Poller
 }
 
@@ -122,6 +123,9 @@ func handler(opts Options) bubbletea.Handler {
 				unsubscribe()
 			}()
 			app.WithPrices(updates)
+			// The poller waits out its interval between polls; a session
+			// opening should not show prices up to an interval old.
+			opts.Prices.Refresh()
 		}
 		return app, nil
 	}
