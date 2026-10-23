@@ -17,6 +17,7 @@
             pkgs.gitleaks
             pkgs.go-migrate
             pkgs.golangci-lint
+            pkgs.govulncheck
           ];
         };
       });

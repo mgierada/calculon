@@ -9,7 +9,7 @@ PKG     := ./cmd/calculon
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build run serve test cover lint fmt import user reset-db clean
+.PHONY: help build run vuln serve test cover vet format import user reset-db clean
 
 help: ## list targets
 	@grep -hE '^[a-z-]+:.*## ' $(firstword $(MAKEFILE_LIST)) | awk -F ':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -19,6 +19,9 @@ build: ## build the binary into bin/
 
 run: build ## open the dashboards fullscreen (USER_NAME=alice picks a user)
 	$(BIN) ui $(if $(USER_NAME),--user $(USER_NAME))
+
+vuln: ## scan dependencies for known vulnerabilities
+	govulncheck $(PKG)
 
 serve: build ## serve the dashboards over ssh on SSH_ADDR
 	$(BIN) serve
